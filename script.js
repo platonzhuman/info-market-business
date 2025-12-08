@@ -3327,6 +3327,204 @@ SectionLoader.loadFunctionality = function() {
     
     document.getElementById('content').innerHTML = content;
 };
+
+// ==================== ДОБАВЛЕНИЕ МЕТОДОВ В APP ====================
+window.App = {
+    ...window.App, // Сохраняем существующие методы
+    
+    // Показываем справку по токену
+    showTokenHelp() {
+        const modalHTML = `
+            <div class="modal">
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2><i class="fab fa-github"></i> Как получить GitHub токен</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="margin-bottom: 20px;">
+                            <p>Для синхронизации данных необходим персональный токен GitHub:</p>
+                        </div>
+                        
+                        <ol style="margin-left: 20px; margin-bottom: 20px;">
+                            <li>Перейдите в <a href="https://github.com/settings/tokens" target="_blank" style="color: var(--accent);">GitHub Tokens</a></li>
+                            <li>Нажмите "Generate new token" → "Generate new token (classic)"</li>
+                            <li>Укажите название (например, "Business Panel Sync")</li>
+                            <li>Выберите срок действия (рекомендуется "No expiration")</li>
+                            <li>Отметьте только разрешение <strong>"gist"</strong></li>
+                            <li>Нажмите "Generate token"</li>
+                            <li>Скопируйте токен (начинается с ghp_) и вставьте в поле выше</li>
+                        </ol>
+                        
+                        <div style="background: var(--warning-light); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                            <strong>⚠️ Важно:</strong>
+                            <ul style="margin: 8px 0 0 20px;">
+                                <li>Никому не сообщайте этот токен</li>
+                                <li>Токен дает доступ к вашим Gist</li>
+                                <li>Если токен утерян, отзовите его на GitHub</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" onclick="ModalService.close()">Понятно</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        ModalService.show(modalHTML);
+    },
+    
+    // Сохраняем настройки синхронизации
+    saveSyncSettings() {
+        const token = document.getElementById('githubToken').value.trim();
+        const gistId = document.getElementById('gistId').value.trim();
+        const autoSync = document.getElementById('autoSync').checked;
+        
+        // Базовая валидация токена
+        if (token && !token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+            NotificationService.show('Неверный формат GitHub токена', 'error');
+            return;
+        }
+        
+        BusinessDataService.data.settings.sync = {
+            githubToken: token,
+            gistId: gistId,
+            lastSync: BusinessDataService.data.settings.sync?.lastSync,
+            autoSync: autoSync
+        };
+        
+        BusinessDataService.save();
+        NotificationService.show('Настройки синхронизации сохранены', 'success');
+        
+        // Если включена автосинхронизация и есть токен, делаем первую синхронизацию
+        if (autoSync && token) {
+            setTimeout(() => this.syncToCloud(), 1000);
+        }
+    },
+    
+    // Синхронизация в облако
+    async syncToCloud() {
+        const token = BusinessDataService.data.settings.sync?.githubToken;
+        if (!token) {
+            NotificationService.show('Сначала настройте GitHub токен', 'error');
+            return;
+        }
+        
+        NotificationService.show('Синхронизация...', 'info');
+        
+        const result = await SyncService.saveToGist();
+        if (result.success) {
+            // Обновляем поле Gist ID если он создан
+            if (result.gistId && !BusinessDataService.data.settings.sync.gistId) {
+                BusinessDataService.data.settings.sync.gistId = result.gistId;
+                BusinessDataService.save();
+            }
+            
+            NotificationService.show('Данные сохранены в облако', 'success');
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        } else {
+            NotificationService.show(`Ошибка: ${result.error}`, 'error');
+        }
+    },
+    
+    // Загрузка из облака
+    async syncFromCloud() {
+        const result = await SyncService.loadFromGist();
+        if (result) {
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        }
+    },
+    
+    // Удаление облачной копии
+    async deleteCloudData() {
+        const result = await SyncService.deleteGist();
+        if (result) {
+            NotificationService.show('Облачная копия удалена', 'success');
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        } else {
+            NotificationService.show('Ошибка удаления', 'error');
+        }
+    }
+};
+
+// ==================== СТИЛИ ДЛЯ СИНХРОНИЗАЦИИ ====================
+const syncStyles = `
+/* Стили для раздела синхронизации */
+.sync-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.sync-success {
+    background: rgba(0, 200, 83, 0.1);
+    color: var(--success);
+}
+
+.sync-error {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--error);
+}
+
+.sync-pending {
+    background: rgba(255, 145, 0, 0.1);
+    color: var(--warning);
+}
+
+.token-help {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+}
+
+.token-help:hover {
+    color: var(--accent);
+}
+
+@media (max-width: 768px) {
+    .sync-buttons {
+        grid-template-columns: 1fr !important;
+    }
+}
+`;
+
+// Добавляем стили в документ
+const syncStyleElement = document.createElement('style');
+syncStyleElement.textContent = syncStyles;
+document.head.appendChild(syncStyleElement);
+
+// ==================== ИНИЦИАЛИЗАЦИЯ СИНХРОНИЗАЦИИ ====================
+// Обновляем инициализацию App для поддержки синхронизации
+const originalAppInit = App.init;
+App.init = function() {
+    if (!AuthService.check()) return;
+    
+    BusinessDataService.init();
+    UIService.init();
+    
+    // Запускаем автосинхронизацию с небольшой задержкой
+    setTimeout(() => {
+        if (BusinessDataService.data.settings?.sync?.autoSync && 
+            BusinessDataService.data.settings.sync.githubToken) {
+            SyncService.autoSync();
+        }
+    }, 2000);
+    
+    const activeItem = document.querySelector('.menu-item.active');
+    const section = activeItem ? activeItem.getAttribute('data-section') : 'main';
+    SectionLoader.load(section);
+};
+
 // ==================== GITHUB КАК БАЗА ДАННЫХ ====================
 // Используем GitHub API для хранения данных в репозитории
 const GitHubDB = {
