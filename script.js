@@ -3327,3 +3327,642 @@ SectionLoader.loadFunctionality = function() {
     
     document.getElementById('content').innerHTML = content;
 };
+// ==================== GITHUB КАК БАЗА ДАННЫХ ====================
+// Используем GitHub API для хранения данных в репозитории
+const GitHubDB = {
+    // Конфигурация
+    REPO_OWNER: 'platonzhuman',
+    REPO_NAME: 'info-market-business',
+    DATA_FILE: 'business-db.json',
+    COMMIT_MESSAGE: 'Auto-save from Business Panel',
+    
+    // Инициализация
+    init() {
+        console.log('📊 GitHub DB initialized');
+        
+        // Проверяем наличие токена
+        this.token = localStorage.getItem('github_db_token');
+        this.username = localStorage.getItem('github_username');
+        
+        if (this.token && this.username) {
+            this.autoLoadData();
+        }
+        
+        return this;
+    },
+    
+    // Настройка токена
+    setupToken(username, token) {
+        this.username = username;
+        this.token = token;
+        
+        localStorage.setItem('github_username', username);
+        localStorage.setItem('github_db_token', token);
+        
+        console.log('🔑 GitHub token saved');
+        return true;
+    },
+    
+    // Проверка соединения
+    async testConnection() {
+        if (!this.token) return false;
+        
+        try {
+            const response = await fetch(`https://api.github.com/repos/${this.REPO_OWNER}/${this.REPO_NAME}`, {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            return response.ok;
+        } catch (error) {
+            console.error('Connection test failed:', error);
+            return false;
+        }
+    },
+    
+    // Получение SHA текущего файла (нужно для обновления)
+    async getFileSHA() {
+        try {
+            const response = await fetch(`https://api.github.com/repos/${this.REPO_OWNER}/${this.REPO_NAME}/contents/${this.DATA_FILE}`, {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            if (response.status === 404) {
+                return null; // Файл не существует
+            }
+            
+            if (!response.ok) {
+                throw new Error(`GitHub API error: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            return data.sha;
+        } catch (error) {
+            console.error('Get file SHA error:', error);
+            return null;
+        }
+    },
+    
+    // Загрузка данных из GitHub
+    async loadData() {
+        if (!this.token) {
+            console.log('No GitHub token');
+            return null;
+        }
+        
+        try {
+            const response = await fetch(`https://api.github.com/repos/${this.REPO_OWNER}/${this.REPO_NAME}/contents/${this.DATA_FILE}`, {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+            
+            if (response.status === 404) {
+                console.log('No data file found, creating new');
+                return null;
+            }
+            
+            if (!response.ok) {
+                throw new Error(`Failed to load data: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            const content = atob(data.content); // Декодируем base64
+            return JSON.parse(content);
+            
+        } catch (error) {
+            console.error('Load data error:', error);
+            return null;
+        }
+    },
+    
+    // Автозагрузка при старте
+    async autoLoadData() {
+        if (!this.token) return;
+        
+        try {
+            const data = await this.loadData();
+            if (data) {
+                // Объединяем с текущими данными
+                BusinessDataService.data = this.mergeData(BusinessDataService.data, data);
+                BusinessDataService.save();
+                console.log('✅ Data loaded from GitHub');
+            }
+        } catch (error) {
+            console.error('Auto-load error:', error);
+        }
+    },
+    
+    // Слияние данных (сохраняем важные локальные настройки)
+    mergeData(localData, cloudData) {
+        // Сохраняем локальные настройки пользователя
+        const currentUser = AuthService.currentUser;
+        const localSettings = localData.settings;
+        
+        // Объединяем данные
+        const merged = { ...cloudData, ...localData };
+        
+        // Восстанавливаем пользователя
+        if (currentUser && merged.staff) {
+            const userInMerged = merged.staff.find(s => 
+                s.id === currentUser.id || s.username === currentUser.username
+            );
+            if (userInMerged) {
+                AuthService.currentUser = userInMerged;
+                StorageService.set(CONFIG.STORAGE_KEYS.USER, userInMerged);
+            }
+        }
+        
+        // Восстанавливаем настройки
+        if (localSettings) {
+            merged.settings = { ...cloudData.settings, ...localSettings };
+        }
+        
+        return merged;
+    },
+    
+    // Сохранение данных в GitHub
+    async saveData() {
+        if (!this.token || !this.username) {
+            console.log('Cannot save: no GitHub credentials');
+            return false;
+        }
+        
+        const dataToSave = {
+            ...BusinessDataService.data,
+            _meta: {
+                savedAt: new Date().toISOString(),
+                savedBy: this.username,
+                version: '1.0'
+            }
+        };
+        
+        const content = JSON.stringify(dataToSave, null, 2);
+        const encodedContent = btoa(unescape(encodeURIComponent(content)));
+        
+        try {
+            // Получаем SHA текущего файла
+            const sha = await this.getFileSHA();
+            
+            const body = {
+                message: this.COMMIT_MESSAGE,
+                content: encodedContent,
+                committer: {
+                    name: this.username,
+                    email: `${this.username}@users.noreply.github.com`
+                }
+            };
+            
+            // Добавляем SHA если файл существует (для обновления)
+            if (sha) {
+                body.sha = sha;
+            }
+            
+            const response = await fetch(`https://api.github.com/repos/${this.REPO_OWNER}/${this.REPO_NAME}/contents/${this.DATA_FILE}`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+            
+            if (!response.ok) {
+                const error = await response.text();
+                console.error('Save failed:', error);
+                return false;
+            }
+            
+            console.log('💾 Data saved to GitHub');
+            return true;
+            
+        } catch (error) {
+            console.error('Save error:', error);
+            return false;
+        }
+    },
+    
+    // Показать настройки
+    showSettings() {
+        const modalHTML = `
+            <div class="modal">
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2><i class="fab fa-github"></i> GitHub как база данных</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="margin-bottom: 20px;">
+                            <p>Настройте автоматическое сохранение всех данных в ваш GitHub репозиторий.</p>
+                            <p><strong>Репозиторий:</strong> ${this.REPO_OWNER}/${this.REPO_NAME}</p>
+                            <p><strong>Файл данных:</strong> ${this.DATA_FILE}</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">GitHub Username</label>
+                            <input type="text" id="githubUsername" class="form-control" 
+                                   value="${this.username || ''}" placeholder="platonzhuman">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Personal Access Token</label>
+                            <input type="password" id="githubToken" class="form-control" 
+                                   value="${this.token ? '••••••••' : ''}" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                            <small style="color: var(--text-light); display: block; margin-top: 4px;">
+                                <a href="https://github.com/settings/tokens/new" target="_blank" style="color: var(--accent);">
+                                    Создать токен
+                                </a> (нужны права: repo)
+                            </small>
+                        </div>
+                        
+                        <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px; margin-top: 20px;">
+                            <strong>📊 Как это работает:</strong>
+                            <ul style="margin: 8px 0 0 20px;">
+                                <li>Все данные сохраняются в файл на GitHub</li>
+                                <li>Автоматически при каждом изменении</li>
+                                <li>Доступно с любого устройства</li>
+                                <li>Версионность и история изменений</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
+                        <button class="btn btn-primary" onclick="GitHubDB.saveSettings()">Сохранить</button>
+                        ${this.token ? `
+                            <button class="btn btn-outline" onclick="GitHubDB.testAndSave()" style="margin-left: 8px;">
+                                Проверить и сохранить
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        ModalService.show(modalHTML);
+    },
+    
+    // Сохранение настроек
+    async saveSettings() {
+        const username = document.getElementById('githubUsername').value.trim();
+        const token = document.getElementById('githubToken').value.trim();
+        
+        if (!username || !token) {
+            NotificationService.show('Заполните все поля', 'error');
+            return;
+        }
+        
+        if (token === '••••••••' && this.token) {
+            // Токен не изменился
+            this.setupToken(username, this.token);
+        } else {
+            this.setupToken(username, token);
+        }
+        
+        // Тестируем соединение
+        const connected = await this.testConnection();
+        
+        if (connected) {
+            NotificationService.show('✅ GitHub подключен!', 'success');
+            
+            // Сохраняем текущие данные в GitHub
+            setTimeout(async () => {
+                const saved = await this.saveData();
+                if (saved) {
+                    NotificationService.show('Данные сохранены на GitHub', 'success');
+                }
+            }, 1000);
+            
+            ModalService.close();
+        } else {
+            NotificationService.show('❌ Ошибка подключения к GitHub', 'error');
+        }
+    },
+    
+    // Тест и сохранение
+    async testAndSave() {
+        const connected = await this.testConnection();
+        
+        if (connected) {
+            NotificationService.show('Подключение успешно', 'success');
+            
+            const saved = await this.saveData();
+            if (saved) {
+                NotificationService.show('Данные сохранены на GitHub', 'success');
+            }
+        } else {
+            NotificationService.show('Ошибка подключения', 'error');
+        }
+    },
+    
+    // Автоматическое сохранение при изменениях
+    startAutoSave() {
+        // Перехватываем все сохранения
+        const originalSave = BusinessDataService.save;
+        let saveTimeout = null;
+        
+        BusinessDataService.save = function() {
+            // Вызываем оригинальный метод
+            const result = originalSave.call(this);
+            
+            // Автосохранение в GitHub
+            if (GitHubDB.token) {
+                // Используем debounce чтобы не спамить
+                if (saveTimeout) clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(async () => {
+                    await GitHubDB.saveData();
+                }, 2000); // 2 секунды задержки
+            }
+            
+            return result;
+        };
+        
+        console.log('🔁 GitHub auto-save enabled');
+    },
+    
+    // Показать статус
+    showStatus() {
+        const modalHTML = `
+            <div class="modal">
+                <div class="modal-content" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h2><i class="fab fa-github"></i> Статус базы данных</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <div style="font-size: 48px; color: ${this.token ? 'var(--success)' : 'var(--text-light)'}; margin-bottom: 16px;">
+                                ${this.token ? '✅' : '❌'}
+                            </div>
+                            <h3>${this.token ? 'GitHub подключен' : 'GitHub не настроен'}</h3>
+                        </div>
+                        
+                        <div class="info-list">
+                            <div class="info-item">
+                                <span class="info-label">Пользователь:</span>
+                                <span class="info-value">${this.username || 'не указан'}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Репозиторий:</span>
+                                <span class="info-value">${this.REPO_OWNER}/${this.REPO_NAME}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Файл данных:</span>
+                                <span class="info-value">${this.DATA_FILE}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Статус:</span>
+                                <span class="info-value ${this.token ? 'status-success' : 'status-error'}">
+                                    ${this.token ? 'Активен' : 'Неактивен'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline" onclick="ModalService.close()">Закрыть</button>
+                        <button class="btn btn-primary" onclick="GitHubDB.showSettings()">
+                            ${this.token ? 'Изменить настройки' : 'Настроить'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        ModalService.show(modalHTML);
+    }
+};
+
+// Инициализируем
+GitHubDB.init();
+
+// ==================== ИНТЕРФЕЙС ====================
+// Добавляем кнопки в интерфейс
+function addGitHubButtons() {
+    // Добавляем в верхнюю панель
+    setTimeout(() => {
+        const topBar = document.querySelector('.top-bar .actions');
+        if (topBar && !document.getElementById('githubButtons')) {
+            const buttonsDiv = document.createElement('div');
+            buttonsDiv.id = 'githubButtons';
+            buttonsDiv.style.cssText = `
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            `;
+            
+            buttonsDiv.innerHTML = `
+                <button class="btn btn-outline btn-sm" onclick="GitHubDB.showStatus()" title="Статус GitHub базы">
+                    <i class="fab fa-github"></i>
+                    <span class="hide-on-mobile">База данных</span>
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="GitHubDB.saveData().then(success => {
+                    if(success) NotificationService.show('Данные сохранены', 'success');
+                })" title="Сохранить сейчас">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="GitHubDB.loadData().then(data => {
+                    if(data) {
+                        BusinessDataService.data = GitHubDB.mergeData(BusinessDataService.data, data);
+                        BusinessDataService.save();
+                        NotificationService.show('Данные загружены', 'success');
+                        window.location.reload();
+                    }
+                })" title="Загрузить из базы">
+                    <i class="fas fa-cloud-download-alt"></i>
+                </button>
+            `;
+            
+            topBar.appendChild(buttonsDiv);
+        }
+        
+        // Добавляем пункт в меню
+        const menuSection = document.querySelector('.menu-section:nth-child(2)');
+        if (menuSection && !document.querySelector('[data-section="github-db"]')) {
+            const menuItem = document.createElement('button');
+            menuItem.className = 'menu-item';
+            menuItem.setAttribute('data-section', 'github-db');
+            menuItem.innerHTML = `
+                <i class="fab fa-github"></i>
+                <span>База данных</span>
+            `;
+            
+            menuItem.addEventListener('click', function(e) {
+                e.preventDefault();
+                document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+                loadGitHubSection();
+                
+                if (window.innerWidth <= 1024) {
+                    const hamburger = document.querySelector('.hamburger');
+                    const sidebar = document.querySelector('.sidebar');
+                    if (hamburger) hamburger.classList.remove('active');
+                    if (sidebar) sidebar.classList.remove('active');
+                }
+            });
+            
+            menuSection.appendChild(menuItem);
+        }
+    }, 1000);
+}
+
+// Загрузка раздела GitHub
+function loadGitHubSection() {
+    const isConnected = !!GitHubDB.token;
+    const lastSync = BusinessDataService.data._meta?.savedAt ? 
+        Utils.formatDate(BusinessDataService.data._meta.savedAt, true) : 'никогда';
+    
+    const content = `
+        <div class="content-header">
+            <h1><i class="fab fa-github"></i> GitHub база данных</h1>
+            <div>
+                <button class="btn btn-outline" onclick="GitHubDB.showStatus()">
+                    <i class="fas fa-info-circle"></i> Статус
+                </button>
+                ${!isConnected ? `
+                    <button class="btn btn-primary" onclick="GitHubDB.showSettings()">
+                        <i class="fas fa-cog"></i> Настроить
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-database"></i> Общая информация</h2>
+                </div>
+                <div class="card-body">
+                    <div class="info-list">
+                        <div class="info-item">
+                            <span class="info-label">Статус:</span>
+                            <span class="info-value ${isConnected ? 'status-success' : 'status-error'}">
+                                ${isConnected ? '✅ Подключено' : '❌ Не подключено'}
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Последнее сохранение:</span>
+                            <span class="info-value">${lastSync}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Репозиторий:</span>
+                            <span class="info-value">${GitHubDB.REPO_OWNER}/${GitHubDB.REPO_NAME}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Файл данных:</span>
+                            <span class="info-value">${GitHubDB.DATA_FILE}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Автосохранение:</span>
+                            <span class="info-value ${isConnected ? 'status-success' : 'status-error'}">
+                                ${isConnected ? 'Включено' : 'Выключено'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-cogs"></i> Управление базой</h2>
+                </div>
+                <div class="card-body">
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        ${isConnected ? `
+                            <button class="btn btn-primary" onclick="GitHubDB.saveData().then(success => {
+                                if(success) NotificationService.show('Данные сохранены на GitHub', 'success');
+                            })">
+                                <i class="fas fa-save"></i> Сохранить сейчас
+                            </button>
+                            <button class="btn btn-outline" onclick="GitHubDB.loadData().then(data => {
+                                if(data) {
+                                    BusinessDataService.data = GitHubDB.mergeData(BusinessDataService.data, data);
+                                    BusinessDataService.save();
+                                    NotificationService.show('Данные загружены', 'success');
+                                    window.location.reload();
+                                }
+                            })">
+                                <i class="fas fa-download"></i> Загрузить из базы
+                            </button>
+                            <button class="btn btn-outline" onclick="window.open('https://github.com/${GitHubDB.REPO_OWNER}/${GitHubDB.REPO_NAME}/blob/main/${GitHubDB.DATA_FILE}', '_blank')">
+                                <i class="fab fa-github"></i> Открыть на GitHub
+                            </button>
+                            <button class="btn btn-outline" onclick="GitHubDB.showSettings()">
+                                <i class="fas fa-edit"></i> Изменить настройки
+                            </button>
+                        ` : `
+                            <div style="text-align: center; padding: 20px;">
+                                <div style="font-size: 48px; color: var(--text-light); margin-bottom: 16px;">
+                                    <i class="fab fa-github"></i>
+                                </div>
+                                <h3 style="color: var(--text-light); margin-bottom: 8px;">База данных не настроена</h3>
+                                <p style="color: var(--text-light); margin-bottom: 20px;">
+                                    Настройте GitHub для автоматического сохранения данных
+                                </p>
+                                <button class="btn btn-primary" onclick="GitHubDB.showSettings()">
+                                    <i class="fas fa-cog"></i> Настроить GitHub
+                                </button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-magic"></i> Как это работает</h2>
+                </div>
+                <div class="card-body">
+                    <ol style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>Создайте GitHub Personal Access Token с правами <code>repo</code></li>
+                        <li>Введите имя пользователя и токен в настройках</li>
+                        <li>Все данные автоматически сохраняются в ваш репозиторий</li>
+                        <li>На любом другом устройстве просто настройте тот же токен</li>
+                        <li>Данные будут автоматически синхронизироваться</li>
+                    </ol>
+                    
+                    <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px;">
+                        <strong>🎯 Преимущества:</strong>
+                        <ul style="margin: 8px 0 0 20px;">
+                            <li>Всегда актуальные данные на всех устройствах</li>
+                            <li>Автоматическое сохранение при каждом изменении</li>
+                            <li>Полная история изменений на GitHub</li>
+                            <li>Резервные копии создаются автоматически</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('content').innerHTML = content;
+}
+
+// Добавляем раздел в загрузчик
+const originalLoad = SectionLoader.load;
+SectionLoader.load = function(section) {
+    if (section === 'github-db') {
+        loadGitHubSection();
+    } else {
+        originalLoad.call(this, section);
+    }
+};
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+// Запускаем после загрузки
+setTimeout(() => {
+    addGitHubButtons();
+    
+    // Включаем автосохранение если настроено
+    if (GitHubDB.token) {
+        GitHubDB.startAutoSave();
+        console.log('🚀 GitHub auto-save started');
+    }
+}, 2000);
+
+console.log('✅ GitHub DB system loaded');
