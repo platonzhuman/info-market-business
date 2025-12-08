@@ -3525,3 +3525,862 @@ App.init = function() {
     SectionLoader.load(section);
 };
 
+// ==================== БЫСТРЫЙ ЭКСПОРТ/ИМПОРТ ДЛЯ РУЧНОЙ СИНХРОНИЗАЦИИ ====================
+// Добавляем кнопки быстрого экспорта/импорта в основной интерфейс
+const originalLoadMain = SectionLoader.loadMain;
+SectionLoader.loadMain = function() {
+    originalLoadMain.call(this);
+    
+    // Добавляем кнопки быстрой синхронизации если пользователь владелец
+    if (AuthService.currentUser?.role === 'owner') {
+        const contentHeader = document.querySelector('.content-header');
+        if (contentHeader) {
+            const syncButtons = document.createElement('div');
+            syncButtons.className = 'sync-buttons';
+            syncButtons.style.cssText = `
+                display: flex;
+                gap: 8px;
+                margin-top: 12px;
+            `;
+            
+            syncButtons.innerHTML = `
+                <button class="btn btn-outline btn-sm" onclick="App.quickExport()" title="Экспорт данных для другого устройства">
+                    <i class="fas fa-file-export"></i> Быстрый экспорт
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="App.quickImport()" title="Импорт данных с другого устройства">
+                    <i class="fas fa-file-import"></i> Быстрый импорт
+                </button>
+            `;
+            
+            contentHeader.appendChild(syncButtons);
+        }
+    }
+};
+
+// Методы быстрого экспорта/импорта
+App.quickExport = function() {
+    const data = {
+        businessData: BusinessDataService.data,
+        exportDate: new Date().toISOString(),
+        version: '3.0'
+    };
+    
+    // Создаем строку данных в base64 для удобства копирования
+    const dataStr = JSON.stringify(data, null, 2);
+    const compressed = btoa(unescape(encodeURIComponent(dataStr)));
+    
+    const modalHTML = `
+        <div class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h2><i class="fas fa-file-export"></i> Быстрый экспорт данных</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>Используйте этот код для переноса данных на другое устройство:</p>
+                    
+                    <div style="margin: 16px 0;">
+                        <textarea id="exportData" style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px;" readonly>${compressed}</textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 8px; margin-top: 16px;">
+                        <button class="btn btn-primary" onclick="App.copyExportData()">
+                            <i class="fas fa-copy"></i> Скопировать код
+                        </button>
+                        <button class="btn btn-outline" onclick="App.downloadExportFile()">
+                            <i class="fas fa-download"></i> Скачать файл
+                        </button>
+                    </div>
+                    
+                    <div style="margin-top: 16px; padding: 12px; background: var(--bg); border-radius: 8px;">
+                        <p><strong>Как использовать:</strong></p>
+                        <ol style="margin-left: 20px;">
+                            <li>Скопируйте код выше</li>
+                            <li>На другом устройстве откройте эту панель</li>
+                            <li>Нажмите "Быстрый импорт"</li>
+                            <li>Вставьте код и нажмите "Импортировать"</li>
+                        </ol>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="ModalService.close()">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalService.show(modalHTML);
+};
+
+App.copyExportData = function() {
+    const textarea = document.getElementById('exportData');
+    textarea.select();
+    document.execCommand('copy');
+    NotificationService.show('Код скопирован в буфер обмена', 'success');
+};
+
+App.downloadExportFile = function() {
+    const data = {
+        businessData: BusinessDataService.data,
+        exportDate: new Date().toISOString(),
+        version: '3.0'
+    };
+    
+    const dataStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const link = document.createElement('a');
+    
+    link.href = URL.createObjectURL(blob);
+    link.download = `business-panel-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    
+    NotificationService.show('Файл скачан', 'success');
+};
+
+App.quickImport = function() {
+    const modalHTML = `
+        <div class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h2><i class="fas fa-file-import"></i> Быстрый импорт данных</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 16px;">
+                        <p>Вставьте код экспорта или загрузите файл:</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="importCode">Код экспорта (base64)</label>
+                        <textarea id="importCode" style="width: 100%; height: 150px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px;" placeholder="Вставьте сюда код экспорта..."></textarea>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 16px 0; color: var(--text-light);">ИЛИ</div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="importFile">Файл экспорта (.json)</label>
+                        <input type="file" id="importFile" class="form-control" accept=".json">
+                    </div>
+                    
+                    <div style="background: rgba(244, 67, 54, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                        <strong>⚠️ Внимание:</strong> Все текущие данные будут заменены!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
+                    <button class="btn btn-primary" onclick="App.processQuickImport()">Импортировать</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalService.show(modalHTML);
+};
+
+App.processQuickImport = function() {
+    const importCode = document.getElementById('importCode').value.trim();
+    const importFile = document.getElementById('importFile').files[0];
+    
+    if (!importCode && !importFile) {
+        NotificationService.show('Введите код или выберите файл', 'error');
+        return;
+    }
+    
+    if (!confirm('Все текущие данные будут заменены. Продолжить?')) {
+        return;
+    }
+    
+    const processData = (dataStr) => {
+        try {
+            const data = JSON.parse(dataStr);
+            
+            if (!data.businessData) {
+                throw new Error('Неверный формат данных');
+            }
+            
+            BusinessDataService.data = BusinessDataService.mergeWithDefaults(data.businessData);
+            BusinessDataService.save();
+            
+            NotificationService.show('Данные успешно импортированы', 'success');
+            ModalService.close();
+            
+            // Перезагружаем текущий раздел
+            setTimeout(() => {
+                SectionLoader.load(SectionLoader.currentSection);
+                NotificationService.show('Перезагрузите страницу для применения изменений', 'info');
+            }, 1000);
+            
+        } catch (error) {
+            NotificationService.show(`Ошибка импорта: ${error.message}`, 'error');
+        }
+    };
+    
+    if (importFile) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            processData(e.target.result);
+        };
+        reader.readAsText(importFile);
+    } else {
+        try {
+            // Декодируем base64
+            const decoded = decodeURIComponent(escape(atob(importCode)));
+            processData(decoded);
+        } catch (error) {
+            NotificationService.show('Неверный формат кода', 'error');
+        }
+    }
+};
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+console.log('Business Panel v3.0 - Sync system loaded');
+
+// ==================== СИСТЕМА АВТОСОХРАНЕНИЯ И СИНХРОНИЗАЦИИ ====================
+// Проверяем, не объявлена ли уже переменная
+if (typeof window.AutoSaveSystem === 'undefined') {
+    window.AutoSaveSystem = {
+        // Инициализация
+        init() {
+            console.log('🚀 Система автосохранения инициализирована');
+            
+            // Патчим методы BusinessDataService для автосохранения
+            this.patchBusinessDataService();
+            
+            // Добавляем кнопки в интерфейс
+            this.addInterfaceButtons();
+            
+            // Запускаем автосохранение
+            this.startAutoSave();
+            
+            return this;
+        },
+        
+        // Патчим методы BusinessDataService
+        patchBusinessDataService() {
+            // Сохраняем оригинальные методы
+            const originalMethods = {};
+            
+            // Методы, которые нужно патчить
+            const methodsToPatch = [
+                'addStaff', 'updateStaff', 'deleteStaff',
+                'addClient', 'updateClient', 'deleteClient',
+                'addIdea', 'updateIdea', 'deleteIdea',
+                'addEmployeeReport', 'updateEmployeeReport', 'deleteEmployeeReport',
+                'addTransaction'
+            ];
+            
+            methodsToPatch.forEach(methodName => {
+                if (BusinessDataService[methodName]) {
+                    originalMethods[methodName] = BusinessDataService[methodName];
+                    
+                    BusinessDataService[methodName] = function(...args) {
+                        const result = originalMethods[methodName].apply(this, args);
+                        
+                        // Автосохранение после успешного выполнения
+                        setTimeout(() => {
+                            BusinessDataService.save();
+                            console.log(`📝 Автосохранение после ${methodName}`);
+                        }, 100);
+                        
+                        return result;
+                    };
+                }
+            });
+            
+            // Также патчим общий метод save
+            const originalSave = BusinessDataService.save;
+            BusinessDataService.save = function() {
+                const result = originalSave.call(this);
+                
+                // Показываем уведомление о сохранении
+                setTimeout(() => {
+                    const notification = document.createElement('div');
+                    notification.className = 'save-notification';
+                    notification.innerHTML = `
+                        <span>💾 Данные сохранены</span>
+                        <small>${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</small>
+                    `;
+                    notification.style.cssText = `
+                        position: fixed;
+                        bottom: 20px;
+                        right: 20px;
+                        background: var(--success);
+                        color: white;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        font-size: 14px;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        z-index: 9999;
+                        animation: slideInUp 0.3s ease;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                    `;
+                    
+                    document.body.appendChild(notification);
+                    
+                    // Удаляем уведомление через 2 секунды
+                    setTimeout(() => {
+                        notification.style.animation = 'slideOutDown 0.3s ease';
+                        setTimeout(() => notification.remove(), 300);
+                    }, 2000);
+                }, 100);
+                
+                return result;
+            };
+            
+            console.log('✅ Методы BusinessDataService успешно патчены');
+        },
+        
+        // Добавляем кнопки в интерфейс
+        addInterfaceButtons() {
+            // Добавляем в верхнюю панель
+            setTimeout(() => {
+                const topBar = document.querySelector('.top-bar .actions');
+                if (topBar && !document.getElementById('autoSaveButtons')) {
+                    const buttonsDiv = document.createElement('div');
+                    buttonsDiv.id = 'autoSaveButtons';
+                    buttonsDiv.style.cssText = `
+                        display: flex;
+                        gap: 8px;
+                        align-items: center;
+                    `;
+                    
+                    buttonsDiv.innerHTML = `
+                        <button class="btn btn-outline btn-sm" onclick="AutoSaveSystem.manualSave()" title="Сохранить сейчас">
+                            <i class="fas fa-save"></i>
+                            <span class="hide-on-mobile">Сохранить</span>
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="AutoSaveSystem.quickExport()" title="Экспорт данных">
+                            <i class="fas fa-file-export"></i>
+                            <span class="hide-on-mobile">Экспорт</span>
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="AutoSaveSystem.quickImport()" title="Импорт данных">
+                            <i class="fas fa-file-import"></i>
+                            <span class="hide-on-mobile">Импорт</span>
+                        </button>
+                    `;
+                    
+                    topBar.appendChild(buttonsDiv);
+                }
+                
+                // Добавляем статус сохранения
+                this.addSaveStatus();
+                
+            }, 1000);
+        },
+        
+        // Добавляем статус сохранения
+        addSaveStatus() {
+            const statusBar = document.querySelector('.top-bar .user-info');
+            if (statusBar && !document.getElementById('saveStatus')) {
+                const statusDiv = document.createElement('div');
+                statusDiv.id = 'saveStatus';
+                statusDiv.style.cssText = `
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    font-size: 12px;
+                    color: var(--success);
+                    margin-right: 12px;
+                `;
+                
+                statusDiv.innerHTML = `
+                    <i class="fas fa-circle" style="font-size: 8px;"></i>
+                    <span>Автосохранение включено</span>
+                `;
+                
+                statusBar.prepend(statusDiv);
+            }
+        },
+        
+        // Запускаем автосохранение по таймеру
+        startAutoSave() {
+            // Автосохранение каждые 30 секунд
+            setInterval(() => {
+                if (BusinessDataService.data) {
+                    BusinessDataService.save();
+                    console.log('⏰ Автосохранение по таймеру');
+                }
+            }, 30000);
+            
+            // Сохранение при закрытии вкладки
+            window.addEventListener('beforeunload', () => {
+                if (BusinessDataService.data) {
+                    BusinessDataService.save();
+                    console.log('🔒 Сохранение при закрытии вкладки');
+                }
+            });
+            
+            // Сохранение при изменении видимости вкладки
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden && BusinessDataService.data) {
+                    BusinessDataService.save();
+                    console.log('👁️ Сохранение при скрытии вкладки');
+                }
+            });
+        },
+        
+        // Ручное сохранение
+        manualSave() {
+            if (BusinessDataService.data) {
+                BusinessDataService.save();
+                this.showNotification('💾 Данные сохранены вручную', 'success');
+            }
+        },
+        
+        // Быстрый экспорт
+        quickExport() {
+            const data = {
+                businessData: BusinessDataService.data,
+                exportDate: new Date().toISOString(),
+                version: '3.0',
+                userId: AuthService.currentUser?.id || 'unknown'
+            };
+            
+            // Создаем сжатый код
+            const dataStr = JSON.stringify(data);
+            const compressed = btoa(unescape(encodeURIComponent(dataStr)));
+            
+            const modalHTML = `
+                <div class="modal">
+                    <div class="modal-content" style="max-width: 700px;">
+                        <div class="modal-header">
+                            <h2><i class="fas fa-file-export"></i> Быстрый экспорт данных</h2>
+                            <button class="close-modal">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Скопируйте этот код для переноса данных на другое устройство:</p>
+                            
+                            <div style="margin: 16px 0;">
+                                <textarea id="exportCode" style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px; resize: vertical; background: #f8f9fa;" readonly>${compressed}</textarea>
+                            </div>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                <button class="btn btn-primary" onclick="AutoSaveSystem.copyExportCode()">
+                                    <i class="fas fa-copy"></i> Скопировать код
+                                </button>
+                                <button class="btn btn-outline" onclick="AutoSaveSystem.downloadExportFile()">
+                                    <i class="fas fa-download"></i> Скачать файл
+                                </button>
+                            </div>
+                            
+                            <div style="margin-top: 20px; padding: 12px; background: var(--bg-light); border-radius: 8px;">
+                                <p><strong>Как использовать:</strong></p>
+                                <ol style="margin-left: 20px;">
+                                    <li>Скопируйте весь код выше (Ctrl+A, Ctrl+C)</li>
+                                    <li>На другом устройстве откройте бизнес-панель</li>
+                                    <li>Нажмите "Импорт" в правом верхнем углу</li>
+                                    <li>Вставьте код и нажмите "Импортировать"</li>
+                                </ol>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="ModalService.close()">Закрыть</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            ModalService.show(modalHTML);
+            
+            setTimeout(() => {
+                const textarea = document.getElementById('exportCode');
+                if (textarea) {
+                    textarea.select();
+                }
+            }, 100);
+        },
+        
+        // Копирование кода экспорта
+        copyExportCode() {
+            const textarea = document.getElementById('exportCode');
+            if (textarea) {
+                textarea.select();
+                textarea.setSelectionRange(0, 99999);
+                document.execCommand('copy');
+                this.showNotification('✅ Код скопирован в буфер обмена', 'success');
+            }
+        },
+        
+        // Скачивание файла экспорта
+        downloadExportFile() {
+            const data = {
+                businessData: BusinessDataService.data,
+                exportDate: new Date().toISOString(),
+                version: '3.0'
+            };
+            
+            const dataStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `бизнес-панель_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            this.showNotification('✅ Файл скачан', 'success');
+        },
+        
+        // Быстрый импорт
+        quickImport() {
+            const modalHTML = `
+                <div class="modal">
+                    <div class="modal-content" style="max-width: 700px;">
+                        <div class="modal-header">
+                            <h2><i class="fas fa-file-import"></i> Быстрый импорт данных</h2>
+                            <button class="close-modal">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <p>Вставьте код экспорта или загрузите файл:</p>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Код экспорта (base64)</label>
+                                <textarea id="importCode" style="width: 100%; height: 150px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px; resize: vertical;" placeholder="Вставьте сюда код экспорта..."></textarea>
+                            </div>
+                            
+                            <div style="text-align: center; margin: 16px 0; color: var(--text-light);">ИЛИ</div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Файл экспорта (.json)</label>
+                                <input type="file" id="importFile" class="form-control" accept=".json">
+                            </div>
+                            
+                            <div style="background: rgba(244, 67, 54, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                                <strong>⚠️ Внимание: Все текущие данные будут заменены!</strong>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
+                            <button class="btn btn-primary" onclick="AutoSaveSystem.processImport()">Импортировать</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            ModalService.show(modalHTML);
+        },
+        
+        // Обработка импорта
+        processImport() {
+            const importCode = document.getElementById('importCode')?.value.trim() || '';
+            const importFileInput = document.getElementById('importFile');
+            const importFile = importFileInput?.files[0];
+            
+            if (!importCode && !importFile) {
+                this.showNotification('❌ Введите код или выберите файл', 'error');
+                return;
+            }
+            
+            if (!confirm('⚠️ Все текущие данные будут заменены. Продолжить?')) {
+                return;
+            }
+            
+            const processData = (dataStr) => {
+                try {
+                    const data = JSON.parse(dataStr);
+                    
+                    if (!data.businessData) {
+                        throw new Error('Неверный формат данных');
+                    }
+                    
+                    // Сохраняем текущего пользователя и настройки
+                    const currentUser = AuthService.currentUser;
+                    const currentSettings = BusinessDataService.data.settings;
+                    
+                    // Заменяем данные
+                    BusinessDataService.data = BusinessDataService.mergeWithDefaults(data.businessData);
+                    
+                    // Восстанавливаем текущего пользователя и настройки
+                    if (currentUser) {
+                        // Находим пользователя в новых данных
+                        const userInNewData = BusinessDataService.data.staff.find(s => 
+                            s.id === currentUser.id || s.username === currentUser.username
+                        );
+                        
+                        if (userInNewData) {
+                            AuthService.currentUser = userInNewData;
+                            StorageService.set(CONFIG.STORAGE_KEYS.USER, userInNewData);
+                        }
+                    }
+                    
+                    // Восстанавливаем настройки
+                    if (currentSettings) {
+                        BusinessDataService.data.settings = { ...data.businessData.settings, ...currentSettings };
+                    }
+                    
+                    BusinessDataService.save();
+                    
+                    this.showNotification('✅ Данные успешно импортированы!', 'success');
+                    ModalService.close();
+                    
+                    // Перезагружаем страницу
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                    
+                } catch (error) {
+                    console.error('Import error:', error);
+                    this.showNotification(`❌ Ошибка: ${error.message}`, 'error');
+                }
+            };
+            
+            if (importFile) {
+                const reader = new FileReader();
+                reader.onload = (e) => processData(e.target.result);
+                reader.onerror = () => this.showNotification('❌ Ошибка чтения файла', 'error');
+                reader.readAsText(importFile);
+            } else {
+                try {
+                    // Декодируем base64
+                    const decoded = decodeURIComponent(escape(atob(importCode)));
+                    processData(decoded);
+                } catch (error) {
+                    this.showNotification('❌ Неверный формат кода', 'error');
+                }
+            }
+        },
+        
+        // Показ уведомления
+        showNotification(message, type = 'info') {
+            return NotificationService.show(message, type);
+        },
+        
+        // Добавляем раздел экспорта/импорта в меню
+        addExportImportMenuItem() {
+            setTimeout(() => {
+                const menuSection = document.querySelector('.menu-section:nth-child(2)');
+                if (menuSection && !document.querySelector('[data-section="export-import"]')) {
+                    const menuItem = document.createElement('button');
+                    menuItem.className = 'menu-item';
+                    menuItem.setAttribute('data-section', 'export-import');
+                    menuItem.innerHTML = `
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Экспорт/Импорт</span>
+                    `;
+                    
+                    menuItem.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+                        this.classList.add('active');
+                        
+                        // Показываем раздел экспорта/импорта
+                        AutoSaveSystem.showExportImportSection();
+                        
+                        if (window.innerWidth <= 1024) {
+                            const hamburger = document.querySelector('.hamburger');
+                            const sidebar = document.querySelector('.sidebar');
+                            if (hamburger) hamburger.classList.remove('active');
+                            if (sidebar) sidebar.classList.remove('active');
+                        }
+                    });
+                    
+                    menuSection.appendChild(menuItem);
+                }
+            }, 1500);
+        },
+        
+        // Показ раздела экспорта/импорта
+        showExportImportSection() {
+            const lastSave = BusinessDataService.data ? 
+                Utils.formatDate(new Date(), true) : 'нет данных';
+            
+            const content = `
+                <div class="content-header">
+                    <h1><i class="fas fa-exchange-alt"></i> Экспорт и импорт данных</h1>
+                </div>
+                
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-info-circle"></i> Информация</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-list">
+                                <div class="info-item">
+                                    <span class="info-label">Последнее сохранение:</span>
+                                    <span class="info-value">${lastSave}</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Количество сотрудников:</span>
+                                    <span class="info-value">${BusinessDataService.data?.staff?.length || 0}</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Количество клиентов:</span>
+                                    <span class="info-value">${BusinessDataService.data?.clients?.length || 0}</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Автосохранение:</span>
+                                    <span class="info-value status-success">Включено</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-file-export"></i> Экспорт данных</h2>
+                        </div>
+                        <div class="card-body">
+                            <p>Экспортируйте все данные для резервного копирования или переноса на другое устройство.</p>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+                                <button class="btn btn-primary" onclick="AutoSaveSystem.quickExport()">
+                                    <i class="fas fa-copy"></i> Экспорт в буфер обмена (код)
+                                </button>
+                                <button class="btn btn-outline" onclick="AutoSaveSystem.downloadExportFile()">
+                                    <i class="fas fa-download"></i> Экспорт в файл (.json)
+                                </button>
+                                <button class="btn btn-outline" onclick="App.exportAllData()">
+                                    <i class="fas fa-database"></i> Полный экспорт (все данные)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2><i class="fas fa-file-import"></i> Импорт данных</h2>
+                        </div>
+                        <div class="card-body">
+                            <p>Импортируйте данные из резервной копии или с другого устройства.</p>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+                                <button class="btn btn-primary" onclick="AutoSaveSystem.quickImport()">
+                                    <i class="fas fa-paste"></i> Импорт из буфера обмена
+                                </button>
+                                <button class="btn btn-outline" onclick="App.showImportModal()">
+                                    <i class="fas fa-upload"></i> Импорт из файла (.json)
+                                </button>
+                                <button class="btn btn-outline" onclick="App.resetDemoData()" style="color: var(--warning);">
+                                    <i class="fas fa-redo"></i> Загрузить демо-данные
+                                </button>
+                            </div>
+                            
+                            <div style="background: rgba(244, 67, 54, 0.1); padding: 12px; border-radius: 8px; margin-top: 20px;">
+                                <strong>⚠️ Важно:</strong>
+                                <ul style="margin: 8px 0 0 20px;">
+                                    <li>При импорте все текущие данные будут заменены</li>
+                                    <li>Рекомендуется создать резервную копию перед импортом</li>
+                                    <li>После импорта страница будет перезагружена</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('content').innerHTML = content;
+        }
+    };
+    
+    // Инициализируем систему
+    setTimeout(() => {
+        window.AutoSaveSystem.init();
+        window.AutoSaveSystem.addExportImportMenuItem();
+    }, 2000);
+}
+
+// ==================== ДОБАВЛЯЕМ СТИЛИ ====================
+const autoSaveStyles = `
+/* Стили для автосохранения */
+.hide-on-mobile {
+    display: inline;
+}
+
+@media (max-width: 768px) {
+    .hide-on-mobile {
+        display: none;
+    }
+}
+
+/* Анимации для уведомлений */
+@keyframes slideInUp {
+    from {
+        transform: translateY(100px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutDown {
+    from {
+        transform: translateY(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateY(100px);
+        opacity: 0;
+    }
+}
+
+.save-notification {
+    animation: slideInUp 0.3s ease;
+}
+
+.save-notification.fade-out {
+    animation: slideOutDown 0.3s ease;
+}
+
+/* Анимация синхронизации */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.syncing {
+    animation: spin 1s linear infinite;
+}
+
+/* Стили для раздела экспорта */
+.export-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+}
+
+.export-option {
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.export-option:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+    border-color: var(--primary);
+}
+
+.export-option i {
+    font-size: 32px;
+    margin-bottom: 12px;
+    color: var(--primary);
+}
+
+@media (max-width: 480px) {
+    .export-options {
+        grid-template-columns: 1fr;
+    }
+}
+`;
+
+// Добавляем стили, если еще не добавлены
+if (!document.getElementById('autoSaveStyles')) {
+    const styleEl = document.createElement('style');
+    styleEl.id = 'autoSaveStyles';
+    styleEl.textContent = autoSaveStyles;
+    document.head.appendChild(styleEl);
+}
+
+console.log('✅ Система автосохранения готова к работе!');
