@@ -2931,46 +2931,63 @@ const styleElement = document.createElement('style');
 styleElement.textContent = additionalStyles;
 document.head.appendChild(styleElement);
 
-// ==================== ПРОСТАЯ GITHUB СИНХРОНИЗАЦИЯ ====================
-const SimpleGitHubSync = {
-    // Конфигурация
+// ==================== GITHUB БАЗА ДАННЫХ - ИСПРАВЛЕННАЯ ВЕРСИЯ ====================
+const GitHubSyncDB = {
+    // Настройки
     config: {
-        repo: 'platonzhuman/info-market-business',
+        owner: 'platonzhuman',
+        repo: 'info-market-business',
         file: 'business-data.json',
         branch: 'main'
     },
     
+    // Состояние
+    state: {
+        token: localStorage.getItem('github_token') || '',
+        username: localStorage.getItem('github_user') || '',
+        isConnected: false,
+        lastSync: null
+    },
+    
     // Инициализация
     init() {
-        console.log('🔄 GitHub Sync initialized');
+        console.log('📊 GitHub Sync DB initialized');
         
-        // Загружаем сохранённые настройки
-        this.token = localStorage.getItem('github_token');
-        this.username = localStorage.getItem('github_username');
-        
-        if (this.token) {
+        // Проверяем токен
+        if (this.state.token) {
             this.testConnection();
         }
+        
+        // Добавляем интерфейс
+        this.addInterface();
         
         return this;
     },
     
-    // Простой тест соединения
+    // Тест соединения
     async testConnection() {
+        if (!this.state.token) return false;
+        
         try {
-            const response = await fetch(`https://api.github.com/repos/${this.config.repo}`, {
+            const response = await fetch('https://api.github.com/user', {
                 headers: this.getHeaders()
             });
             
             if (response.ok) {
-                console.log('✅ GitHub connection OK');
+                const userData = await response.json();
+                this.state.username = userData.login || 'platonzhuman';
+                this.state.isConnected = true;
+                localStorage.setItem('github_user', this.state.username);
+                console.log('✅ GitHub connection successful');
                 return true;
             } else {
-                console.warn('GitHub connection failed:', response.status);
+                this.state.isConnected = false;
+                console.warn('GitHub connection failed');
                 return false;
             }
         } catch (error) {
             console.error('Connection test error:', error);
+            this.state.isConnected = false;
             return false;
         }
     },
@@ -2978,14 +2995,14 @@ const SimpleGitHubSync = {
     // Получение заголовков
     getHeaders() {
         return {
-            'Authorization': `token ${this.token}`,
+            'Authorization': `token ${this.state.token}`,
             'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json'
         };
     },
     
-    // Показать простой диалог настройки
-    showSimpleSetup() {
+    // Настройка токена
+    showSetup() {
         const modalHTML = `
             <div class="modal">
                 <div class="modal-content" style="max-width: 500px;">
@@ -2994,45 +3011,41 @@ const SimpleGitHubSync = {
                         <button class="close-modal">&times;</button>
                     </div>
                     <div class="modal-body">
-                        <p>Для синхронизации нужен GitHub токен:</p>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Ваш GitHub логин</label>
-                            <input type="text" id="simpleGithubUser" class="form-control" 
-                                   value="${this.username || 'platonzhuman'}" 
-                                   placeholder="platonzhuman">
-                        </div>
+                        <p><strong>Вставьте ваш GitHub Personal Access Token:</strong></p>
                         
                         <div class="form-group">
                             <label class="form-label">GitHub Token</label>
-                            <input type="password" id="simpleGithubToken" class="form-control" 
-                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
-                            <div style="margin-top: 8px;">
-                                <a href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=Business+Panel" 
-                                   target="_blank" class="btn btn-outline btn-sm">
-                                    <i class="fas fa-external-link-alt"></i> Создать токен
-                                </a>
-                            </div>
+                            <input type="password" id="githubToken" class="form-control" 
+                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                                   value="${this.state.token || ''}">
                         </div>
                         
-                        <div style="background: rgba(0, 176, 255, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
-                            <strong>📝 Как создать токен:</strong>
+                        <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                            <strong>📝 Как создать рабочий токен:</strong>
                             <ol style="margin: 8px 0 0 20px; font-size: 13px;">
-                                <li>Нажмите "Создать токен" выше</li>
-                                <li>Введите описание "Business Panel"</li>
-                                <li>Выберите <strong>No expiration</strong></li>
-                                <li>Отметьте только: <strong>repo</strong> и <strong>workflow</strong></li>
-                                <li>Нажмите "Generate token"</li>
+                                <li>Перейдите: <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+                                <li>Нажмите <strong>"Generate new token (classic)"</strong> ← ВАЖНО!</li>
+                                <li>Название: <code>Business Panel Sync</code></li>
+                                <li>Срок: <strong>No expiration</strong> ✅</li>
+                                <li>Права: <strong>ТОЛЬКО "repo"</strong> ✅</li>
+                                <li>Нажмите <strong>"Generate token"</strong></li>
                                 <li>Скопируйте токен (начинается с ghp_)</li>
-                                <li>Вставьте его в поле выше</li>
+                                <li>Вставьте в поле выше</li>
                             </ol>
+                            
+                            <div style="margin-top: 12px; padding: 8px; background: rgba(244, 67, 54, 0.1); border-radius: 4px; font-size: 12px;">
+                                <strong>⚠️ Если не работает:</strong>
+                                <ul style="margin: 4px 0 0 15px;">
+                                    <li>Токен должен быть <strong>classic</strong> (не fine-grained)</li>
+                                    <li>Должна быть галочка <strong>"repo"</strong></li>
+                                    <li>Срок должен быть <strong>"No expiration"</strong></li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
-                        <button class="btn btn-primary" onclick="SimpleGitHubSync.saveSimpleSettings()">
-                            Сохранить и проверить
-                        </button>
+                        <button class="btn btn-primary" onclick="GitHubSyncDB.saveToken()">Сохранить</button>
                     </div>
                 </div>
             </div>
@@ -3041,105 +3054,106 @@ const SimpleGitHubSync = {
         ModalService.show(modalHTML);
     },
     
-    // Сохранение простых настроек
-    async saveSimpleSettings() {
-        const username = document.getElementById('simpleGithubUser').value.trim();
-        const token = document.getElementById('simpleGithubToken').value.trim();
-        
-        if (!username || !token) {
-            NotificationService.show('Заполните все поля', 'error');
-            return;
-        }
+    // Сохранение токена
+    async saveToken() {
+        const token = document.getElementById('githubToken').value.trim();
         
         if (!token.startsWith('ghp_')) {
             NotificationService.show('Токен должен начинаться с ghp_', 'error');
             return;
         }
         
-        // Сохраняем
-        this.username = username;
-        this.token = token;
+        // Сохраняем временно для теста
+        const tempToken = this.state.token;
+        this.state.token = token;
         
-        localStorage.setItem('github_username', username);
-        localStorage.setItem('github_token', token);
-        
-        // Тестируем
+        // Тестируем соединение
         const connected = await this.testConnection();
         
         if (connected) {
-            NotificationService.show('✅ GitHub подключён!', 'success');
+            // Сохраняем в localStorage
+            localStorage.setItem('github_token', token);
+            localStorage.setItem('github_user', this.state.username);
             
-            // Пробуем загрузить данные
+            NotificationService.show('✅ GitHub подключен!', 'success');
+            
+            // Загружаем данные
             setTimeout(() => {
                 this.loadData();
+                this.updateUI();
             }, 1000);
             
             ModalService.close();
         } else {
-            NotificationService.show('❌ Ошибка подключения. Проверьте токен.', 'error');
+            // Восстанавливаем старый токен
+            this.state.token = tempToken;
+            NotificationService.show('❌ Токен недействителен. Проверьте права.', 'error');
         }
     },
     
     // Загрузка данных
     async loadData() {
-        if (!this.token) return;
+        if (!this.state.isConnected) {
+            console.log('Not connected to GitHub');
+            return false;
+        }
         
         try {
-            // Получаем текущий файл
-            const response = await fetch(`https://api.github.com/repos/${this.config.repo}/contents/${this.config.file}`, {
-                headers: this.getHeaders()
-            });
+            const response = await fetch(
+                `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
+                { headers: this.getHeaders() }
+            );
             
             if (response.status === 404) {
                 console.log('Файл не найден, создадим при первом сохранении');
-                return null;
+                return false;
             }
             
             if (!response.ok) {
-                throw new Error(`GitHub error: ${response.status}`);
+                throw new Error(`GitHub API error: ${response.status}`);
             }
             
             const fileData = await response.json();
-            const content = atob(fileData.content); // Декодируем base64
+            const content = atob(fileData.content);
             const data = JSON.parse(content);
             
-            // Объединяем с локальными данными
-            this.mergeWithLocalData(data);
+            // Спрашиваем подтверждение
+            if (confirm('Найдены данные в облаке. Загрузить их?\n(Текущие данные будут заменены)')) {
+                this.mergeData(data);
+                this.state.lastSync = new Date().toISOString();
+                NotificationService.show('✅ Данные загружены из облака', 'success');
+                return true;
+            }
             
-            NotificationService.show('✅ Данные загружены из GitHub', 'success');
-            return data;
+            return false;
             
         } catch (error) {
-            console.error('Load error:', error);
+            console.error('Load data error:', error);
             NotificationService.show('Ошибка загрузки данных', 'warning');
-            return null;
+            return false;
         }
     },
     
     // Слияние данных
-    mergeWithLocalData(cloudData) {
-        if (!cloudData) return;
-        
+    mergeData(cloudData) {
         // Сохраняем текущего пользователя
         const currentUser = AuthService.currentUser;
+        const currentSettings = BusinessDataService.data.settings;
         
-        // Объединяем
+        // Объединяем данные
         BusinessDataService.data = {
             ...cloudData,
-            settings: {
-                ...cloudData.settings,
-                ...BusinessDataService.data.settings
-            }
+            settings: { ...cloudData.settings, ...currentSettings }
         };
         
-        // Восстанавливаем текущего пользователя
+        // Восстанавливаем пользователя
         if (currentUser && BusinessDataService.data.staff) {
-            const userInData = BusinessDataService.data.staff.find(s => 
+            const user = BusinessDataService.data.staff.find(s => 
                 s.id === currentUser.id || s.username === currentUser.username
             );
-            if (userInData) {
-                AuthService.currentUser = userInData;
-                StorageService.set(CONFIG.STORAGE_KEYS.USER, userInData);
+            if (user) {
+                AuthService.currentUser = user;
+                StorageService.set(CONFIG.STORAGE_KEYS.USER, user);
             }
         }
         
@@ -3153,41 +3167,44 @@ const SimpleGitHubSync = {
     
     // Сохранение данных
     async saveData() {
-        if (!this.token) {
+        if (!this.state.isConnected) {
             NotificationService.show('Сначала настройте GitHub', 'warning');
             return false;
         }
         
         try {
-            // Подготавливаем данные
-            const dataToSave = {
-                ...BusinessDataService.data,
-                _lastSync: new Date().toISOString(),
-                _syncedBy: this.username
-            };
-            
-            const content = JSON.stringify(dataToSave, null, 2);
-            const encodedContent = btoa(unescape(encodeURIComponent(content)));
-            
-            // Получаем SHA текущего файла (если есть)
+            // Получаем SHA существующего файла
             let sha = null;
             try {
-                const existingFile = await fetch(`https://api.github.com/repos/${this.config.repo}/contents/${this.config.file}`, {
-                    headers: this.getHeaders()
-                });
+                const response = await fetch(
+                    `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
+                    { headers: this.getHeaders() }
+                );
                 
-                if (existingFile.ok) {
-                    const fileData = await existingFile.json();
-                    sha = fileData.sha;
+                if (response.ok) {
+                    const data = await response.json();
+                    sha = data.sha;
                 }
             } catch (e) {
                 // Файла нет, создаём новый
             }
             
-            // Тело запроса
+            // Подготавливаем данные
+            const dataToSave = {
+                ...BusinessDataService.data,
+                _meta: {
+                    savedAt: new Date().toISOString(),
+                    savedBy: this.state.username,
+                    version: '2.0'
+                }
+            };
+            
+            const content = JSON.stringify(dataToSave, null, 2);
+            const encoded = btoa(unescape(encodeURIComponent(content)));
+            
             const body = {
-                message: `Auto-sync: ${new Date().toLocaleString()}`,
-                content: encodedContent,
+                message: `Autosave: ${new Date().toLocaleString('ru-RU')}`,
+                content: encoded,
                 branch: this.config.branch
             };
             
@@ -3196,17 +3213,22 @@ const SimpleGitHubSync = {
             }
             
             // Отправляем
-            const response = await fetch(`https://api.github.com/repos/${this.config.repo}/contents/${this.config.file}`, {
-                method: 'PUT',
-                headers: this.getHeaders(),
-                body: JSON.stringify(body)
-            });
+            const response = await fetch(
+                `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
+                {
+                    method: 'PUT',
+                    headers: this.getHeaders(),
+                    body: JSON.stringify(body)
+                }
+            );
             
             if (!response.ok) {
                 throw new Error(`Save failed: ${response.status}`);
             }
             
-            console.log('💾 Saved to GitHub');
+            this.state.lastSync = new Date().toISOString();
+            console.log('💾 Data saved to GitHub');
+            
             return true;
             
         } catch (error) {
@@ -3216,31 +3238,88 @@ const SimpleGitHubSync = {
         }
     },
     
-    // Добавить кнопку синхронизации
-    addSyncButton() {
+    // Автосохранение
+    enableAutoSave() {
+        if (!this.state.isConnected) return;
+        
+        let timeout = null;
+        
+        // Перехватываем сохранения
+        const originalSave = BusinessDataService.save;
+        BusinessDataService.save = function() {
+            const result = originalSave.call(this);
+            
+            // Автосохранение в GitHub
+            if (timeout) clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                if (GitHubSyncDB.state.isConnected) {
+                    GitHubSyncDB.saveData().then(success => {
+                        if (success) {
+                            // Показываем уведомление в углу
+                            const notif = document.createElement('div');
+                            notif.style.cssText = `
+                                position: fixed;
+                                bottom: 20px;
+                                right: 20px;
+                                background: var(--success);
+                                color: white;
+                                padding: 8px 12px;
+                                border-radius: 6px;
+                                font-size: 12px;
+                                z-index: 9999;
+                                animation: fadeIn 0.3s;
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                            `;
+                            notif.innerHTML = `
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <span>Синхронизировано</span>
+                            `;
+                            document.body.appendChild(notif);
+                            
+                            setTimeout(() => {
+                                notif.style.animation = 'fadeOut 0.3s';
+                                setTimeout(() => notif.remove(), 300);
+                            }, 2000);
+                        }
+                    });
+                }
+            }, 3000);
+            
+            return result;
+        };
+        
+        console.log('🔁 GitHub auto-save enabled');
+    },
+    
+    // Добавление интерфейса
+    addInterface() {
+        // Добавляем кнопку в верхнюю панель
         setTimeout(() => {
             const topBar = document.querySelector('.top-bar .actions');
-            if (topBar && !document.getElementById('githubSyncBtn')) {
+            if (topBar && !document.getElementById('syncBtn')) {
                 const btn = document.createElement('button');
-                btn.id = 'githubSyncBtn';
+                btn.id = 'syncBtn';
                 btn.className = 'btn btn-outline btn-sm';
                 btn.innerHTML = `
-                    <i class="fab fa-github"></i>
-                    <span class="hide-on-mobile">${this.token ? 'Синхр.' : 'Настроить'}</span>
+                    <i class="fas fa-sync-alt"></i>
+                    <span class="hide-on-mobile">${this.state.isConnected ? 'Синхр.' : 'Настроить'}</span>
                 `;
-                btn.title = this.token ? 'GitHub синхронизация' : 'Настроить GitHub синхронизацию';
-                btn.onclick = () => this.token ? this.saveData() : this.showSimpleSetup();
+                btn.title = this.state.isConnected ? 'Синхронизировать с облаком' : 'Настроить синхронизацию';
+                btn.onclick = () => this.state.isConnected ? this.saveData() : this.showSetup();
                 
-                // Добавляем индикатор
-                if (this.token) {
+                // Индикатор статуса
+                if (this.state.isConnected) {
                     const indicator = document.createElement('span');
                     indicator.style.cssText = `
-                        width: 8px;
-                        height: 8px;
+                        width: 6px;
+                        height: 6px;
                         background: var(--success);
                         border-radius: 50%;
                         display: inline-block;
                         margin-left: 4px;
+                        vertical-align: middle;
                     `;
                     btn.appendChild(indicator);
                 }
@@ -3248,44 +3327,275 @@ const SimpleGitHubSync = {
                 topBar.appendChild(btn);
             }
         }, 1000);
+        
+        // Добавляем пункт меню "sync-db"
+        this.addMenuItem();
     },
     
-    // Автосохранение при изменениях
-    setupAutoSave() {
-        if (!this.token) return;
-        
-        let saveTimer = null;
-        
-        // Перехватываем сохранения
-        const originalSave = BusinessDataService.save;
-        BusinessDataService.save = function() {
-            const result = originalSave.call(this);
+    // Добавление пункта меню
+    addMenuItem() {
+        setTimeout(() => {
+            const menuSection = document.querySelector('.menu-section:nth-child(2)');
+            if (menuSection && !document.querySelector('[data-section="sync-db"]')) {
+                const menuItem = document.createElement('button');
+                menuItem.className = 'menu-item';
+                menuItem.setAttribute('data-section', 'sync-db');
+                menuItem.innerHTML = `
+                    <i class="fas fa-database"></i>
+                    <span>База данных</span>
+                `;
+                
+                menuItem.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+                    menuItem.classList.add('active');
+                    
+                    // Загружаем раздел синхронизации
+                    this.loadSyncSection();
+                    
+                    if (window.innerWidth <= 1024) {
+                        const hamburger = document.querySelector('.hamburger');
+                        const sidebar = document.querySelector('.sidebar');
+                        if (hamburger) hamburger.classList.remove('active');
+                        if (sidebar) sidebar.classList.remove('active');
+                    }
+                });
+                
+                menuSection.appendChild(menuItem);
+            }
+        }, 1500);
+    },
+    
+    // Обновление UI
+    updateUI() {
+        const btn = document.getElementById('syncBtn');
+        if (btn) {
+            btn.innerHTML = `
+                <i class="fas fa-sync-alt"></i>
+                <span class="hide-on-mobile">${this.state.isConnected ? 'Синхр.' : 'Настроить'}</span>
+            `;
+            btn.title = this.state.isConnected ? 'Синхронизировать с облаком' : 'Настроить синхронизацию';
+            btn.onclick = () => this.state.isConnected ? this.saveData() : this.showSetup();
             
-            // Автосохранение в GitHub через 3 секунды
-            if (saveTimer) clearTimeout(saveTimer);
-            saveTimer = setTimeout(async () => {
-                await SimpleGitHubSync.saveData();
-            }, 3000);
-            
-            return result;
-        };
+            // Обновляем индикатор
+            if (this.state.isConnected) {
+                if (!btn.querySelector('.status-indicator')) {
+                    const indicator = document.createElement('span');
+                    indicator.className = 'status-indicator';
+                    indicator.style.cssText = `
+                        width: 6px;
+                        height: 6px;
+                        background: var(--success);
+                        border-radius: 50%;
+                        display: inline-block;
+                        margin-left: 4px;
+                        vertical-align: middle;
+                    `;
+                    btn.appendChild(indicator);
+                }
+            } else {
+                const indicator = btn.querySelector('.status-indicator');
+                if (indicator) indicator.remove();
+            }
+        }
+    },
+    
+    // Загрузка раздела синхронизации
+    loadSyncSection() {
+        const lastSync = this.state.lastSync ? 
+            Utils.formatDate(this.state.lastSync, true) : 'никогда';
         
-        console.log('🔁 GitHub auto-save enabled');
+        const content = `
+            <div class="content-header">
+                <h1><i class="fas fa-database"></i> Синхронизация базы данных</h1>
+                <div>
+                    ${this.state.isConnected ? `
+                        <button class="btn btn-outline" onclick="GitHubSyncDB.saveData()">
+                            <i class="fas fa-cloud-upload-alt"></i> Сохранить сейчас
+                        </button>
+                        <button class="btn btn-outline" onclick="GitHubSyncDB.loadData()">
+                            <i class="fas fa-cloud-download-alt"></i> Загрузить
+                        </button>
+                    ` : `
+                        <button class="btn btn-primary" onclick="GitHubSyncDB.showSetup()">
+                            <i class="fab fa-github"></i> Настроить GitHub
+                        </button>
+                    `}
+                </div>
+            </div>
+            
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-info-circle"></i> Статус синхронизации</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-list">
+                            <div class="info-item">
+                                <span class="info-label">Статус:</span>
+                                <span class="info-value ${this.state.isConnected ? 'status-success' : 'status-error'}">
+                                    ${this.state.isConnected ? '✅ Подключено к GitHub' : '❌ Не подключено'}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Последняя синхронизация:</span>
+                                <span class="info-value">${lastSync}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Репозиторий:</span>
+                                <span class="info-value">${this.config.owner}/${this.config.repo}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Файл данных:</span>
+                                <span class="info-value">${this.config.file}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Автосохранение:</span>
+                                <span class="info-value ${this.state.isConnected ? 'status-success' : 'status-error'}">
+                                    ${this.state.isConnected ? 'Включено' : 'Выключено'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-sync-alt"></i> Управление синхронизацией</h2>
+                    </div>
+                    <div class="card-body">
+                        ${this.state.isConnected ? `
+                            <div style="margin-bottom: 20px;">
+                                <p>Все изменения автоматически синхронизируются с облаком.</p>
+                            </div>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <button class="btn btn-primary" onclick="GitHubSyncDB.saveData()">
+                                    <i class="fas fa-save"></i> Сохранить сейчас в облако
+                                </button>
+                                <button class="btn btn-outline" onclick="GitHubSyncDB.loadData()">
+                                    <i class="fas fa-download"></i> Загрузить из облака
+                                </button>
+                                <button class="btn btn-outline" onclick="window.open('https://github.com/${this.config.owner}/${this.config.repo}/blob/main/${this.config.file}', '_blank')">
+                                    <i class="fab fa-github"></i> Просмотреть данные на GitHub
+                                </button>
+                                <button class="btn btn-outline" onclick="GitHubSyncDB.showSetup()">
+                                    <i class="fas fa-cog"></i> Изменить настройки
+                                </button>
+                            </div>
+                        ` : `
+                            <div style="text-align: center; padding: 20px;">
+                                <div style="font-size: 48px; color: var(--text-light); margin-bottom: 16px;">
+                                    <i class="fas fa-cloud"></i>
+                                </div>
+                                <h3 style="color: var(--text-light); margin-bottom: 8px;">Синхронизация не настроена</h3>
+                                <p style="color: var(--text-light); margin-bottom: 20px;">
+                                    Настройте GitHub для автоматической синхронизации данных между всеми устройствами
+                                </p>
+                                <button class="btn btn-primary" onclick="GitHubSyncDB.showSetup()">
+                                    <i class="fab fa-github"></i> Настроить GitHub Sync
+                                </button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-question-circle"></i> Как это работает</h2>
+                    </div>
+                    <div class="card-body">
+                        <ol style="margin-left: 20px; margin-bottom: 20px;">
+                            <li><strong>Настройте GitHub токен</strong> с правами "repo"</li>
+                            <li><strong>Все изменения</strong> автоматически сохраняются в облако</li>
+                            <li><strong>На другом устройстве</strong> настройте тот же токен</li>
+                            <li><strong>Данные синхронизируются</strong> автоматически</li>
+                            <li><strong>Полная история</strong> изменений хранится на GitHub</li>
+                        </ol>
+                        
+                        <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px;">
+                            <strong>🎯 Преимущества:</strong>
+                            <ul style="margin: 8px 0 0 20px;">
+                                <li>Автоматическая синхронизация между устройствами</li>
+                                <li>Резервные копии в облаке</li>
+                                <li>Полная история изменений</li>
+                                <li>Работает в реальном времени</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('content').innerHTML = content;
+    },
+    
+    // Удаление токена
+    clearToken() {
+        this.state.token = '';
+        this.state.username = '';
+        this.state.isConnected = false;
+        
+        localStorage.removeItem('github_token');
+        localStorage.removeItem('github_user');
+        
+        this.updateUI();
+        NotificationService.show('Токен удалён', 'info');
     }
 };
 
 // Инициализируем
-SimpleGitHubSync.init();
+GitHubSyncDB.init();
 
-// Добавляем кнопку
+// Добавляем автосохранение
 setTimeout(() => {
-    SimpleGitHubSync.addSyncButton();
-    SimpleGitHubSync.setupAutoSave();
-}, 1500);
+    GitHubSyncDB.enableAutoSave();
+}, 2000);
 
-// Простой интерфейс
-window.setupGitHubSync = () => SimpleGitHubSync.showSimpleSetup();
-window.saveToGitHub = () => SimpleGitHubSync.saveData();
-window.loadFromGitHub = () => SimpleGitHubSync.loadData();
+// Добавляем в глобальную область видимости
+window.GitHubSyncDB = GitHubSyncDB;
 
-console.log('🚀 Simple GitHub Sync loaded');
+// Добавляем стили
+const syncStyles = `
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(10px); }
+}
+
+.hide-on-mobile {
+    display: inline;
+}
+
+@media (max-width: 768px) {
+    .hide-on-mobile {
+        display: none;
+    }
+}
+
+.sync-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 6px;
+}
+
+.sync-status-connected {
+    background: var(--success);
+}
+
+.sync-status-disconnected {
+    background: var(--error);
+}
+`;
+
+const styleEl = document.createElement('style');
+styleEl.textContent = syncStyles;
+document.head.appendChild(styleEl);
+
+console.log('✅ GitHub Sync DB system loaded');
