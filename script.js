@@ -3601,69 +3601,23 @@ document.head.appendChild(styleEl);
 console.log('✅ GitHub Sync DB system loaded');
 
 
-// ==================== ПРОСТАЯ GITHUB СИНХРОНИЗАЦИЯ ====================
-const SimpleGitHubSync = {
+// ==================== ИСПРАВЛЕННАЯ GITHUB СИНХРОНИЗАЦИЯ ====================
+const GitHubSyncFixed = {
     // Настройки
     token: localStorage.getItem('github_token') || '',
     username: 'platonzhuman',
+    isConnected: false,
     
     // Инициализация
     init() {
-        console.log('🔄 GitHub Sync initialized');
+        console.log('🚀 GitHub Sync Fixed initialized');
         
-        // Добавляем кнопки
-        setTimeout(() => {
-            this.addButton();
-            this.addMenuItem();
-        }, 2000);
+        this.isConnected = !!this.token;
+        
+        // Добавляем кнопку
+        setTimeout(() => this.addSyncButton(), 1000);
         
         return this;
-    },
-    
-    // Добавляем кнопку
-    addButton() {
-        // Ищем верхнюю панель
-        const topBar = document.querySelector('.top-bar');
-        if (!topBar) return;
-        
-        // Создаем контейнер если нет
-        let actions = topBar.querySelector('.actions');
-        if (!actions) {
-            actions = document.createElement('div');
-            actions.className = 'actions';
-            actions.style.cssText = `
-                display: flex;
-                gap: 8px;
-                align-items: center;
-            `;
-            topBar.appendChild(actions);
-        }
-        
-        // Создаем кнопку
-        const button = document.createElement('button');
-        button.id = 'syncBtn';
-        button.className = 'btn btn-outline btn-sm';
-        button.innerHTML = this.token ? 
-            '<i class="fas fa-cloud"></i> Синхр' : 
-            '<i class="fas fa-cog"></i> Настроить';
-        button.onclick = () => this.token ? this.saveToGitHub() : this.showSetup();
-        
-        // Индикатор статуса
-        if (this.token) {
-            const indicator = document.createElement('span');
-            indicator.style.cssText = `
-                width: 6px;
-                height: 6px;
-                background: var(--success);
-                border-radius: 50%;
-                display: inline-block;
-                margin-left: 4px;
-                vertical-align: middle;
-            `;
-            button.appendChild(indicator);
-        }
-        
-        actions.appendChild(button);
     },
     
     // Показываем настройку
@@ -3680,26 +3634,28 @@ const SimpleGitHubSync = {
                         
                         <div class="form-group">
                             <label class="form-label">GitHub Token</label>
-                            <input type="password" id="githubToken" class="form-control" 
-                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                            <input type="password" id="githubTokenFixed" class="form-control" 
+                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                                   value="${this.token || ''}">
                         </div>
                         
-                        <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px;">
-                            <strong>📝 Как получить токен:</strong>
+                        <div style="background: rgba(26, 35, 126, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                            <strong>⚠️ Важно: токен должен иметь права "repo"</strong>
                             <ol style="margin: 8px 0 0 20px; font-size: 13px;">
-                                <li>Откройте: <a href="https://github.com/settings/tokens/new?scopes=repo&description=Business+Panel" target="_blank">Создать токен</a></li>
+                                <li>Откройте: <a href="https://github.com/settings/tokens/new" target="_blank">Создать токен</a></li>
                                 <li>Выберите <strong>"Generate new token (classic)"</strong></li>
                                 <li>Название: <code>Business Panel</code></li>
                                 <li>Срок: <strong>No expiration</strong></li>
-                                <li>Права: <strong>ТОЛЬКО "repo"</strong> (и все подпункты)</li>
+                                <li>Права: <strong>ТОЛЬКО "repo"</strong></li>
                                 <li>Нажмите "Generate token"</li>
                                 <li>Скопируйте токен (начинается с ghp_)</li>
+                                <li>Вставьте в поле выше</li>
                             </ol>
                         </div>
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
-                        <button class="btn btn-primary" onclick="SimpleGitHubSync.saveToken()">Сохранить</button>
+                        <button class="btn btn-primary" onclick="GitHubSyncFixed.saveToken()">Сохранить</button>
                     </div>
                 </div>
             </div>
@@ -3709,33 +3665,102 @@ const SimpleGitHubSync = {
     },
     
     // Сохраняем токен
-    async saveToken() {
-        const token = document.getElementById('githubToken').value.trim();
+    saveToken() {
+        const token = document.getElementById('githubTokenFixed').value.trim();
+        
+        if (!token) {
+            NotificationService.show('Введите токен', 'error');
+            return;
+        }
         
         if (!token.startsWith('ghp_')) {
             NotificationService.show('Токен должен начинаться с ghp_', 'error');
             return;
         }
         
-        // Проверяем токен
-        const isValid = await this.testToken(token);
+        this.token = token;
+        localStorage.setItem('github_token', token);
+        this.isConnected = true;
         
-        if (isValid) {
-            this.token = token;
-            localStorage.setItem('github_token', token);
+        NotificationService.show('✅ Токен сохранен!', 'success');
+        ModalService.close();
+        
+        // Обновляем кнопку
+        this.updateSyncButton();
+        
+        // Тестируем соединение
+        this.testConnection();
+    },
+    
+    // Тест соединения
+    async testConnection() {
+        try {
+            const response = await fetch('https://api.github.com/user', {
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
             
-            NotificationService.show('✅ GitHub подключен!', 'success');
-            ModalService.close();
-            
-            // Обновляем кнопку
-            const btn = document.getElementById('syncBtn');
-            if (btn) {
-                btn.innerHTML = '<i class="fas fa-cloud"></i> Синхр';
-                btn.onclick = () => this.saveToGitHub();
-                
-                // Добавляем индикатор
-                const indicator = document.createElement('span');
-                indicator.style.cssText = `
+            if (response.ok) {
+                console.log('✅ GitHub connection OK');
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Connection test error:', error);
+            return false;
+        }
+    },
+    
+    // Добавляем кнопку синхронизации
+    addSyncButton() {
+        // Находим верхнюю панель
+        const topBar = document.querySelector('.top-bar');
+        if (!topBar) return;
+        
+        // Создаем или находим контейнер действий
+        let actions = topBar.querySelector('.actions');
+        if (!actions) {
+            actions = document.createElement('div');
+            actions.className = 'actions';
+            actions.style.cssText = `
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                margin-left: auto;
+            `;
+            topBar.appendChild(actions);
+        }
+        
+        // Создаем кнопку
+        const button = document.createElement('button');
+        button.id = 'syncBtnFixed';
+        button.className = 'btn btn-outline btn-sm';
+        button.innerHTML = this.getButtonHTML();
+        button.title = this.isConnected ? 'Сохранить в облако' : 'Настроить синхронизацию';
+        button.onclick = () => this.isConnected ? this.saveToGitHub() : this.showSetup();
+        
+        actions.appendChild(button);
+    },
+    
+    // Обновляем кнопку
+    updateSyncButton() {
+        const button = document.getElementById('syncBtnFixed');
+        if (button) {
+            button.innerHTML = this.getButtonHTML();
+            button.title = this.isConnected ? 'Сохранить в облако' : 'Настроить синхронизацию';
+            button.onclick = () => this.isConnected ? this.saveToGitHub() : this.showSetup();
+        }
+    },
+    
+    // HTML для кнопки
+    getButtonHTML() {
+        if (this.isConnected) {
+            return `
+                <i class="fas fa-cloud"></i>
+                <span>Синхр</span>
+                <span style="
                     width: 6px;
                     height: 6px;
                     background: var(--success);
@@ -3743,37 +3768,28 @@ const SimpleGitHubSync = {
                     display: inline-block;
                     margin-left: 4px;
                     vertical-align: middle;
-                `;
-                btn.appendChild(indicator);
-            }
-            
-            // Сохраняем данные
-            setTimeout(() => this.saveToGitHub(), 1000);
+                "></span>
+            `;
         } else {
-            NotificationService.show('❌ Неверный токен. Проверьте права.', 'error');
+            return `
+                <i class="fas fa-cloud"></i>
+                <span>Настроить</span>
+                <span style="
+                    width: 6px;
+                    height: 6px;
+                    background: var(--error);
+                    border-radius: 50%;
+                    display: inline-block;
+                    margin-left: 4px;
+                    vertical-align: middle;
+                "></span>
+            `;
         }
     },
     
-    // Проверка токена
-    async testToken(token) {
-        try {
-            const response = await fetch('https://api.github.com/user', {
-                headers: {
-                    'Authorization': `token ${token}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-            
-            return response.ok;
-        } catch (error) {
-            console.error('Token test error:', error);
-            return false;
-        }
-    },
-    
-    // Сохранение в GitHub
+    // Сохранение в GitHub (ИСПРАВЛЕННАЯ ВЕРСИЯ)
     async saveToGitHub() {
-        if (!this.token) {
+        if (!this.isConnected || !this.token) {
             this.showSetup();
             return;
         }
@@ -3785,91 +3801,206 @@ const SimpleGitHubSync = {
             const data = {
                 businessData: BusinessDataService.data,
                 savedAt: new Date().toISOString(),
-                version: '1.0'
+                version: '2.0',
+                savedBy: this.username
             };
             
             const content = JSON.stringify(data, null, 2);
             const encoded = btoa(unescape(encodeURIComponent(content)));
             
-            // Пробуем получить существующий файл
+            // Шаг 1: Пробуем получить текущий файл
             let sha = null;
             try {
-                const response = await fetch('https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json', {
-                    headers: {
-                        'Authorization': `token ${this.token}`,
-                        'Accept': 'application/vnd.github.v3+json'
+                const getResponse = await fetch(
+                    'https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json',
+                    {
+                        headers: {
+                            'Authorization': `token ${this.token}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
                     }
-                });
+                );
                 
-                if (response.ok) {
-                    const fileData = await response.json();
+                if (getResponse.ok) {
+                    const fileData = await getResponse.json();
                     sha = fileData.sha;
+                } else if (getResponse.status === 404) {
+                    sha = null; // Файла нет, создадим новый
+                } else {
+                    throw new Error(`Failed to get file: ${getResponse.status}`);
                 }
-            } catch (e) {
-                // Файла нет
+            } catch (error) {
+                console.log('File not found or error:', error.message);
+                sha = null;
             }
             
-            // Тело запроса
+            // Шаг 2: Сохраняем файл
             const body = {
                 message: `Autosave: ${new Date().toLocaleString('ru-RU')}`,
-                content: encoded,
-                committer: {
-                    name: this.username,
-                    email: `${this.username}@users.noreply.github.com`
-                }
+                content: encoded
             };
             
+            // Добавляем SHA только если он есть
             if (sha) {
                 body.sha = sha;
             }
             
-            // Отправляем
-            const response = await fetch('https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json', {
-                method: 'PUT',
-                headers: {
-                    'Authorization': `token ${this.token}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(body)
-            });
+            const response = await fetch(
+                'https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json',
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                }
+            );
+            
+            // Шаг 3: Обработка ответа
+            if (response.status === 409) {
+                // Конфликт - файл был изменен, пробуем получить актуальный SHA и повторить
+                NotificationService.show('Конфликт, повторяем...', 'warning');
+                
+                // Получаем актуальный SHA
+                const retryResponse = await fetch(
+                    'https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json',
+                    {
+                        headers: {
+                            'Authorization': `token ${this.token}`,
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    }
+                );
+                
+                if (retryResponse.ok) {
+                    const fileData = await retryResponse.json();
+                    body.sha = fileData.sha;
+                    
+                    // Пробуем снова с новым SHA
+                    const retrySave = await fetch(
+                        'https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json',
+                        {
+                            method: 'PUT',
+                            headers: {
+                                'Authorization': `token ${this.token}`,
+                                'Accept': 'application/vnd.github.v3+json',
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(body)
+                        }
+                    );
+                    
+                    if (retrySave.ok) {
+                        NotificationService.show('✅ Данные сохранены на GitHub', 'success');
+                        console.log('💾 Saved to GitHub after retry');
+                        return true;
+                    }
+                }
+                
+                throw new Error('Failed to save after conflict');
+            }
             
             if (response.ok) {
                 NotificationService.show('✅ Данные сохранены на GitHub', 'success');
                 console.log('💾 Saved to GitHub');
                 return true;
             } else {
-                const error = await response.text();
-                console.error('Save error:', error);
-                NotificationService.show('❌ Ошибка сохранения', 'error');
-                return false;
+                const errorText = await response.text();
+                console.error('Save error response:', errorText);
+                throw new Error(`Save failed: ${response.status}`);
             }
             
         } catch (error) {
             console.error('Save error:', error);
-            NotificationService.show('❌ Ошибка сети', 'error');
+            NotificationService.show('❌ Ошибка сохранения: ' + error.message, 'error');
             return false;
         }
     },
     
-    // Добавляем пункт меню
-    addMenuItem() {
+    // Просмотр файла на GitHub
+    viewOnGitHub() {
+        window.open('https://github.com/platonzhuman/info-market-business/blob/main/business-data.json', '_blank');
+    },
+    
+    // Загрузка данных из GitHub
+    async loadFromGitHub() {
+        if (!this.isConnected) {
+            NotificationService.show('Сначала настройте GitHub', 'warning');
+            return;
+        }
+        
+        try {
+            const response = await fetch(
+                'https://api.github.com/repos/platonzhuman/info-market-business/contents/business-data.json',
+                {
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                }
+            );
+            
+            if (response.ok) {
+                const fileData = await response.json();
+                const content = atob(fileData.content);
+                const data = JSON.parse(content);
+                
+                if (confirm('Загрузить данные из облака?\nТекущие данные будут заменены.')) {
+                    // Сохраняем текущего пользователя
+                    const currentUser = AuthService.currentUser;
+                    
+                    BusinessDataService.data = data.businessData;
+                    BusinessDataService.save();
+                    
+                    // Восстанавливаем пользователя
+                    if (currentUser && BusinessDataService.data.staff) {
+                        const user = BusinessDataService.data.staff.find(s => 
+                            s.id === currentUser.id || s.username === currentUser.username
+                        );
+                        if (user) {
+                            AuthService.currentUser = user;
+                            StorageService.set('user', user);
+                        }
+                    }
+                    
+                    NotificationService.show('✅ Данные загружены из облака', 'success');
+                    window.location.reload();
+                }
+            } else if (response.status === 404) {
+                NotificationService.show('Файл не найден в облаке', 'warning');
+            } else {
+                throw new Error(`Load failed: ${response.status}`);
+            }
+            
+        } catch (error) {
+            console.error('Load error:', error);
+            NotificationService.show('Ошибка загрузки: ' + error.message, 'error');
+        }
+    },
+    
+    // Добавляем секцию в меню
+    addSyncSection() {
         setTimeout(() => {
+            // Добавляем пункт меню
             const menuSection = document.querySelector('.menu-section:nth-child(2)');
             if (!menuSection) return;
             
             const menuItem = document.createElement('button');
             menuItem.className = 'menu-item';
-            menuItem.setAttribute('data-section', 'sync-db');
-            menuItem.innerHTML = `
-                <i class="fas fa-database"></i>
-                <span>База данных</span>
-            `;
+            menuItem.innerHTML = '<i class="fas fa-sync-alt"></i><span>Синхронизация</span>';
             
-            menuItem.addEventListener('click', (e) => {
-                e.preventDefault();
-                document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+            menuItem.addEventListener('click', () => {
+                // Убираем активность у других пунктов
+                document.querySelectorAll('.menu-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // Добавляем активность текущему
                 menuItem.classList.add('active');
+                
+                // Показываем секцию синхронизации
                 this.showSyncSection();
             });
             
@@ -3877,19 +4008,22 @@ const SimpleGitHubSync = {
         }, 1000);
     },
     
-    // Показываем раздел синхронизации
+    // Показываем секцию синхронизации
     showSyncSection() {
         const content = `
             <div class="content-header">
-                <h1><i class="fas fa-database"></i> Синхронизация базы данных</h1>
+                <h1><i class="fas fa-sync-alt"></i> Синхронизация данных</h1>
                 <div>
-                    ${this.token ? `
-                        <button class="btn btn-primary" onclick="SimpleGitHubSync.saveToGitHub()">
-                            <i class="fas fa-save"></i> Сохранить сейчас
+                    ${this.isConnected ? `
+                        <button class="btn btn-primary" onclick="GitHubSyncFixed.saveToGitHub()">
+                            <i class="fas fa-cloud-upload-alt"></i> Сохранить сейчас
+                        </button>
+                        <button class="btn btn-outline" onclick="GitHubSyncFixed.loadFromGitHub()">
+                            <i class="fas fa-cloud-download-alt"></i> Загрузить из облака
                         </button>
                     ` : `
-                        <button class="btn btn-primary" onclick="SimpleGitHubSync.showSetup()">
-                            <i class="fas fa-cog"></i> Настроить
+                        <button class="btn btn-primary" onclick="GitHubSyncFixed.showSetup()">
+                            <i class="fab fa-github"></i> Настроить синхронизацию
                         </button>
                     `}
                 </div>
@@ -3904,8 +4038,8 @@ const SimpleGitHubSync = {
                         <div class="info-list">
                             <div class="info-item">
                                 <span class="info-label">Синхронизация:</span>
-                                <span class="info-value ${this.token ? 'status-success' : 'status-error'}">
-                                    ${this.token ? '✅ Настроена' : '❌ Не настроена'}
+                                <span class="info-value ${this.isConnected ? 'status-success' : 'status-error'}">
+                                    ${this.isConnected ? '✅ Настроена' : '❌ Не настроена'}
                                 </span>
                             </div>
                             <div class="info-item">
@@ -3916,24 +4050,31 @@ const SimpleGitHubSync = {
                                 <span class="info-label">Файл данных:</span>
                                 <span class="info-value">business-data.json</span>
                             </div>
+                            <div class="info-item">
+                                <span class="info-label">Ваш ID:</span>
+                                <span class="info-value">${this.username}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
                 
                 <div class="card">
                     <div class="card-header">
-                        <h2><i class="fas fa-sync-alt"></i> Управление</h2>
+                        <h2><i class="fas fa-cogs"></i> Управление</h2>
                     </div>
                     <div class="card-body">
                         <div style="display: flex; flex-direction: column; gap: 12px;">
-                            ${this.token ? `
-                                <button class="btn btn-primary" onclick="SimpleGitHubSync.saveToGitHub()">
-                                    <i class="fas fa-cloud-upload-alt"></i> Сохранить в облако
+                            ${this.isConnected ? `
+                                <button class="btn btn-primary" onclick="GitHubSyncFixed.saveToGitHub()">
+                                    <i class="fas fa-save"></i> Сохранить в облако сейчас
                                 </button>
-                                <button class="btn btn-outline" onclick="window.open('https://github.com/platonzhuman/info-market-business/blob/main/business-data.json', '_blank')">
-                                    <i class="fab fa-github"></i> Посмотреть на GitHub
+                                <button class="btn btn-outline" onclick="GitHubSyncFixed.loadFromGitHub()">
+                                    <i class="fas fa-download"></i> Загрузить из облака
                                 </button>
-                                <button class="btn btn-outline" onclick="SimpleGitHubSync.showSetup()">
+                                <button class="btn btn-outline" onclick="GitHubSyncFixed.viewOnGitHub()">
+                                    <i class="fab fa-github"></i> Посмотреть данные на GitHub
+                                </button>
+                                <button class="btn btn-outline" onclick="GitHubSyncFixed.showSetup()">
                                     <i class="fas fa-edit"></i> Изменить настройки
                                 </button>
                             ` : `
@@ -3942,10 +4083,10 @@ const SimpleGitHubSync = {
                                         <i class="fas fa-cloud"></i>
                                     </div>
                                     <h3 style="color: var(--text-light);">Синхронизация не настроена</h3>
-                                    <p style="color: var(--text-light); margin-bottom: 20px;">
-                                        Настройте GitHub для автоматического сохранения данных
+                                    <p style="color: var(--text-light);">
+                                        Настройте GitHub для автоматического сохранения данных между устройствами
                                     </p>
-                                    <button class="btn btn-primary" onclick="SimpleGitHubSync.showSetup()">
+                                    <button class="btn btn-primary" onclick="GitHubSyncFixed.showSetup()">
                                         <i class="fab fa-github"></i> Настроить GitHub
                                     </button>
                                 </div>
@@ -3957,37 +4098,38 @@ const SimpleGitHubSync = {
         `;
         
         document.getElementById('content').innerHTML = content;
-    },
-    
-    // Включаем автосохранение
-    enableAutoSave() {
-        if (!this.token) return;
-        
-        let timeout = null;
-        
-        const originalSave = BusinessDataService.save;
-        BusinessDataService.save = function() {
-            const result = originalSave.call(this);
-            
-            if (timeout) clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                SimpleGitHubSync.saveToGitHub();
-            }, 5000);
-            
-            return result;
-        };
     }
 };
 
 // Инициализируем
-SimpleGitHubSync.init();
+GitHubSyncFixed.init();
+
+// Добавляем секцию в меню
+setTimeout(() => {
+    GitHubSyncFixed.addSyncSection();
+}, 1500);
 
 // Включаем автосохранение
 setTimeout(() => {
-    SimpleGitHubSync.enableAutoSave();
-}, 3000);
+    if (GitHubSyncFixed.isConnected) {
+        // Патчим сохранение для автосинхронизации
+        const originalSave = BusinessDataService.save;
+        BusinessDataService.save = function() {
+            const result = originalSave.call(this);
+            
+            // Автосохранение в GitHub с задержкой 5 секунд
+            setTimeout(() => {
+                GitHubSyncFixed.saveToGitHub();
+            }, 5000);
+            
+            return result;
+        };
+        
+        console.log('🔁 Автосохранение включено');
+    }
+}, 2000);
 
 // Добавляем в глобальную область
-window.SimpleGitHubSync = SimpleGitHubSync;
+window.GitHubSyncFixed = GitHubSyncFixed;
 
-console.log('✅ Simple GitHub Sync loaded');
+console.log('✅ GitHub Sync Fixed loaded');
