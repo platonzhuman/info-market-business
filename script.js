@@ -3601,19 +3601,20 @@ document.head.appendChild(styleEl);
 console.log('✅ GitHub Sync DB system loaded');
 
 
-// ==================== GITHUB СИНХРОНИЗАЦИЯ ====================
+// ==================== GITHUB СИНХРОНИЗАЦИЯ - ФИНАЛЬНАЯ ВЕРСИЯ ====================
 const GitHubSync = {
     config: {
         owner: 'platonzhuman',
         repo: 'info-market-business',
-        file: 'business-sync.json', // Используем другой файл
+        file: 'business-data-encrypted.txt', // Изменяем имя файла
         branch: 'main'
     },
     
     state: {
         token: localStorage.getItem('github_token') || '',
         isConnected: false,
-        lastSync: null
+        lastSync: null,
+        isSaving: false
     },
     
     init() {
@@ -3624,7 +3625,6 @@ const GitHubSync = {
         }
         
         this.addInterface();
-        this.enableAutoSave();
         
         return this;
     },
@@ -3638,8 +3638,10 @@ const GitHubSync = {
             });
             
             this.state.isConnected = response.ok;
+            console.log('✅ GitHub connection:', response.ok);
             return response.ok;
-        } catch {
+        } catch (error) {
+            console.error('Connection error:', error);
             this.state.isConnected = false;
             return false;
         }
@@ -3647,9 +3649,31 @@ const GitHubSync = {
     
     getHeaders() {
         return {
-            'Authorization': `token ${this.state.token}`,
-            'Accept': 'application/vnd.github.v3+json'
+            'Authorization': `Bearer ${this.state.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
         };
+    },
+    
+    // Простое шифрование (base64 + соль)
+    encrypt(data) {
+        const salt = 'business-panel-2024';
+        const str = salt + JSON.stringify(data);
+        return btoa(unescape(encodeURIComponent(str)));
+    },
+    
+    // Расшифровка
+    decrypt(encrypted) {
+        try {
+            const str = decodeURIComponent(escape(atob(encrypted)));
+            const salt = 'business-panel-2024';
+            if (str.startsWith(salt)) {
+                return JSON.parse(str.substring(salt.length));
+            }
+            return JSON.parse(str);
+        } catch {
+            return null;
+        }
     },
     
     showSetup() {
@@ -3657,24 +3681,28 @@ const GitHubSync = {
             <div class="modal">
                 <div class="modal-content" style="max-width: 500px;">
                     <div class="modal-header">
-                        <h2><i class="fab fa-github"></i> Настройка GitHub</h2>
+                        <h2><i class="fab fa-github"></i> Настройка синхронизации</h2>
                         <button class="close-modal">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
                             <label class="form-label">GitHub Token</label>
                             <input type="password" id="githubToken" class="form-control" 
+                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                                    value="${this.state.token || ''}">
+                            <small class="form-text">Начинается с ghp_ или github_pat_</small>
                         </div>
+                        
                         <div style="background: rgba(26, 35, 126, 0.1); padding: 10px; border-radius: 8px; margin-top: 10px;">
-                            <strong>Как получить токен:</strong>
+                            <strong>Инструкция:</strong>
                             <ol style="margin: 5px 0 0 20px; font-size: 13px;">
-                                <li>Зайдите на <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+                                <li>Откройте <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
                                 <li>Нажмите "Generate new token (classic)"</li>
                                 <li>Название: <code>Business Panel</code></li>
                                 <li>Срок: <strong>No expiration</strong></li>
                                 <li>Права: <strong>ТОЛЬКО "repo"</strong></li>
-                                <li>Скопируйте токен (начинается с ghp_)</li>
+                                <li>Нажмите "Generate token"</li>
+                                <li>Скопируйте токен</li>
                             </ol>
                         </div>
                     </div>
@@ -3706,6 +3734,9 @@ const GitHubSync = {
             NotificationService.show('✅ GitHub подключен', 'success');
             this.updateUI();
             ModalService.close();
+            
+            // Сразу пробуем сохранить
+            setTimeout(() => this.saveData(), 1000);
         } else {
             this.state.token = '';
             NotificationService.show('❌ Неверный токен', 'error');
@@ -3713,44 +3744,54 @@ const GitHubSync = {
     },
     
     async saveData() {
-        if (!this.state.isConnected) return false;
+        if (this.state.isSaving) {
+            console.log('Уже сохраняется, пропускаем...');
+            return false;
+        }
+        
+        if (!this.state.isConnected) {
+            console.log('Not connected to GitHub');
+            return false;
+        }
+        
+        this.state.isSaving = true;
         
         try {
-            // Готовим данные
-            const data = {
-                ...BusinessDataService.data,
-                _meta: {
-                    savedAt: new Date().toISOString(),
-                    version: '1.0'
-                }
-            };
+            // 1. Подготавливаем данные (удаляем пароли)
+            const dataToSave = this.prepareDataForSave();
             
-            const content = JSON.stringify(data, null, 2);
-            const encoded = btoa(unescape(encodeURIComponent(content)));
+            // 2. Шифруем
+            const encrypted = this.encrypt(dataToSave);
             
-            // Сначала проверяем, существует ли файл
+            // 3. Проверяем существование файла
             let sha = null;
             try {
-                const check = await fetch(
+                const checkResponse = await fetch(
                     `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
-                    { headers: this.getHeaders() }
+                    {
+                        headers: this.getHeaders(),
+                        signal: AbortSignal.timeout(3000)
+                    }
                 );
                 
-                if (check.ok) {
-                    const fileData = await check.json();
+                if (checkResponse.ok) {
+                    const fileData = await checkResponse.json();
                     sha = fileData.sha;
                 }
-            } catch {}
+            } catch (error) {
+                // Файла нет - это нормально
+                console.log('Файл не найден, создаем новый');
+            }
             
-            // Отправляем
+            // 4. Отправляем
             const response = await fetch(
                 `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
                 {
                     method: 'PUT',
                     headers: this.getHeaders(),
                     body: JSON.stringify({
-                        message: `Sync ${new Date().toISOString()}`,
-                        content: encoded,
+                        message: `Sync: ${new Date().toLocaleString('ru-RU')}`,
+                        content: encrypted,
                         ...(sha ? { sha } : {})
                     })
                 }
@@ -3758,29 +3799,34 @@ const GitHubSync = {
             
             if (response.ok) {
                 this.state.lastSync = new Date().toISOString();
-                this.showNotification('✅ Сохранено в облако');
+                this.showNotification('✅ Данные сохранены в облако');
+                console.log('💾 Data saved to GitHub');
                 return true;
             } else {
-                const error = await response.json();
-                console.error('Save error:', error);
+                const errorData = await response.json();
+                console.error('Save failed:', response.status, errorData);
                 
-                // Если 409 - пробуем без SHA (create new)
+                // Если 409, пробуем создать файл заново
                 if (response.status === 409) {
-                    const retry = await fetch(
+                    console.log('Конфликт, пробуем создать новый файл...');
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    const retryResponse = await fetch(
                         `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
                         {
                             method: 'PUT',
                             headers: this.getHeaders(),
                             body: JSON.stringify({
-                                message: `Sync ${new Date().toISOString()}`,
-                                content: encoded
+                                message: `New sync: ${new Date().toLocaleString('ru-RU')}`,
+                                content: encrypted
                             })
                         }
                     );
                     
-                    if (retry.ok) {
+                    if (retryResponse.ok) {
                         this.state.lastSync = new Date().toISOString();
-                        this.showNotification('✅ Сохранено в облако');
+                        this.showNotification('✅ Данные сохранены в облако');
                         return true;
                     }
                 }
@@ -3793,11 +3839,42 @@ const GitHubSync = {
             console.error('Save error:', error);
             this.showNotification('❌ Ошибка сети', 'error');
             return false;
+        } finally {
+            this.state.isSaving = false;
         }
     },
     
+    // Подготовка данных для сохранения
+    prepareDataForSave() {
+        const data = JSON.parse(JSON.stringify(BusinessDataService.data));
+        
+        // Удаляем чувствительные данные
+        if (data.staff) {
+            data.staff = data.staff.map(staff => {
+                const { password, passwordChanged, ...safeStaff } = staff;
+                return safeStaff;
+            });
+        }
+        
+        // Удаляем токены
+        if (data.settings) {
+            delete data.settings.githubToken;
+        }
+        
+        // Добавляем метаданные
+        data._meta = {
+            savedAt: new Date().toISOString(),
+            version: '2.0'
+        };
+        
+        return data;
+    },
+    
     async loadData() {
-        if (!this.state.isConnected) return false;
+        if (!this.state.isConnected) {
+            this.showNotification('❌ Сначала подключите GitHub', 'error');
+            return false;
+        }
         
         try {
             const response = await fetch(
@@ -3806,19 +3883,25 @@ const GitHubSync = {
             );
             
             if (!response.ok) {
-                this.showNotification('❌ Файл не найден', 'warning');
-                return false;
+                if (response.status === 404) {
+                    this.showNotification('❌ Файл не найден в облаке', 'warning');
+                    return false;
+                }
+                throw new Error(`Ошибка: ${response.status}`);
             }
             
             const fileData = await response.json();
-            const content = atob(fileData.content.replace(/\n/g, ''));
-            const data = JSON.parse(content);
+            const decrypted = this.decrypt(fileData.content.replace(/\n/g, ''));
             
-            if (confirm('Загрузить данные из облака? Текущие данные будут заменены.')) {
-                BusinessDataService.data = data;
-                BusinessDataService.save();
-                this.showNotification('✅ Данные загружены');
-                location.reload();
+            if (!decrypted) {
+                this.showNotification('❌ Ошибка расшифровки', 'error');
+                return false;
+            }
+            
+            if (confirm('Найдены данные в облаке. Загрузить их?\n(Текущие данные будут заменены)')) {
+                this.mergeData(decrypted);
+                this.state.lastSync = new Date().toISOString();
+                this.showNotification('✅ Данные загружены из облака');
                 return true;
             }
             
@@ -3828,6 +3911,46 @@ const GitHubSync = {
             console.error('Load error:', error);
             this.showNotification('❌ Ошибка загрузки', 'error');
             return false;
+        }
+    },
+    
+    // Слияние данных
+    mergeData(cloudData) {
+        try {
+            // Сохраняем текущего пользователя
+            const currentUser = AuthService.currentUser;
+            const currentPassword = currentUser?.password;
+            
+            // Объединяем данные
+            BusinessDataService.data = {
+                ...cloudData,
+                // Сохраняем пароли
+                staff: cloudData.staff?.map(staff => {
+                    const currentStaff = BusinessDataService.data.staff?.find(s => 
+                        s.id === staff.id || s.username === staff.username
+                    );
+                    
+                    return {
+                        ...staff,
+                        password: currentStaff?.password || staff.password,
+                        passwordChanged: currentStaff?.passwordChanged || staff.passwordChanged
+                    };
+                }) || []
+            };
+            
+            BusinessDataService.save();
+            
+            // Перезагружаем текущий раздел
+            if (SectionLoader.currentSection) {
+                SectionLoader.load(SectionLoader.currentSection);
+            }
+            
+            // Обновляем интерфейс
+            AuthService.updateUI();
+            
+        } catch (error) {
+            console.error('Merge error:', error);
+            this.showNotification('❌ Ошибка слияния данных', 'error');
         }
     },
     
@@ -3846,6 +3969,8 @@ const GitHubSync = {
             align-items: center;
             gap: 8px;
             font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideInUp 0.3s;
         `;
         
         notif.innerHTML = `
@@ -3862,30 +3987,35 @@ const GitHubSync = {
         }, 3000);
     },
     
-    enableAutoSave() {
+    // Простое автосохранение
+    enableSimpleAutoSave() {
         if (!this.state.isConnected) return;
         
         console.log('🔁 Auto-save enabled');
         
-        // Перехватываем сохранения
-        const originalSave = BusinessDataService.save;
+        let saveTimeout = null;
         
+        const scheduleSave = () => {
+            if (saveTimeout) clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                if (this.state.isConnected && !this.state.isSaving) {
+                    this.saveData().catch(() => {});
+                }
+            }, 10000); // 10 секунд задержки
+        };
+        
+        // Перехватываем сохранение
+        const originalSave = BusinessDataService.save;
         BusinessDataService.save = function() {
             const result = originalSave.call(this);
-            
-            // Автосохранение через 5 секунд
-            setTimeout(() => {
-                if (GitHubSync.state.isConnected) {
-                    GitHubSync.saveData();
-                }
-            }, 5000);
-            
+            scheduleSave();
             return result;
         };
     },
     
     addInterface() {
         setTimeout(() => {
+            // Кнопка в верхней панели
             const topBar = document.querySelector('.top-bar .actions');
             if (topBar && !document.getElementById('syncBtn')) {
                 const btn = document.createElement('button');
@@ -3893,12 +4023,18 @@ const GitHubSync = {
                 btn.className = 'btn btn-outline btn-sm';
                 btn.innerHTML = `
                     <i class="fas fa-cloud"></i>
-                    <span>${this.state.isConnected ? 'Синхр' : 'GitHub'}</span>
+                    <span class="hide-on-mobile">${this.state.isConnected ? 'Синхр' : 'GitHub'}</span>
                 `;
-                btn.title = this.state.isConnected ? 'Синхронизировать' : 'Настроить GitHub';
-                btn.onclick = () => this.state.isConnected ? this.saveData() : this.showSetup();
+                btn.title = this.state.isConnected ? 'Синхронизировать с облаком' : 'Настроить GitHub';
+                btn.onclick = () => {
+                    if (this.state.isConnected) {
+                        this.saveData();
+                    } else {
+                        this.showSetup();
+                    }
+                };
                 
-                // Индикатор
+                // Индикатор статуса
                 const dot = document.createElement('span');
                 dot.style.cssText = `
                     width: 6px;
@@ -3912,7 +4048,114 @@ const GitHubSync = {
                 
                 topBar.appendChild(btn);
             }
+            
+            // Кнопка в меню
+            const menuSection = document.querySelector('.menu-section:nth-child(2)');
+            if (menuSection && !document.querySelector('[data-section="cloud-sync"]')) {
+                const menuItem = document.createElement('button');
+                menuItem.className = 'menu-item';
+                menuItem.setAttribute('data-section', 'cloud-sync');
+                menuItem.innerHTML = `
+                    <i class="fas fa-database"></i>
+                    <span>Облако</span>
+                `;
+                
+                menuItem.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    document.querySelectorAll('.menu-item').forEach(i => i.classList.remove('active'));
+                    menuItem.classList.add('active');
+                    this.loadCloudSection();
+                    
+                    if (window.innerWidth <= 1024) {
+                        document.querySelector('.hamburger')?.classList.remove('active');
+                        document.querySelector('.sidebar')?.classList.remove('active');
+                    }
+                });
+                
+                menuSection.appendChild(menuItem);
+            }
         }, 1000);
+    },
+    
+    loadCloudSection() {
+        const lastSync = this.state.lastSync ? 
+            Utils.formatDate(this.state.lastSync, true) : 'никогда';
+        
+        const content = `
+            <div class="content-header">
+                <h1><i class="fas fa-cloud"></i> Облачная синхронизация</h1>
+                <div>
+                    ${this.state.isConnected ? `
+                        <button class="btn btn-primary" onclick="GitHubSync.saveData()">
+                            <i class="fas fa-cloud-upload-alt"></i> Сохранить
+                        </button>
+                        <button class="btn btn-outline" onclick="GitHubSync.loadData()">
+                            <i class="fas fa-cloud-download-alt"></i> Загрузить
+                        </button>
+                    ` : `
+                        <button class="btn btn-primary" onclick="GitHubSync.showSetup()">
+                            <i class="fab fa-github"></i> Настроить
+                        </button>
+                    `}
+                </div>
+            </div>
+            
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-info-circle"></i> Статус</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="info-list">
+                            <div class="info-item">
+                                <span class="info-label">Подключение:</span>
+                                <span class="info-value ${this.state.isConnected ? 'status-success' : 'status-error'}">
+                                    ${this.state.isConnected ? '✅ Подключено' : '❌ Не подключено'}
+                                </span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Последняя синхронизация:</span>
+                                <span class="info-value">${lastSync}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Репозиторий:</span>
+                                <span class="info-value">${this.config.owner}/${this.config.repo}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Файл:</span>
+                                <span class="info-value">${this.config.file}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-sync-alt"></i> Действия</h2>
+                    </div>
+                    <div class="card-body">
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button class="btn btn-primary" onclick="GitHubSync.saveData()">
+                                <i class="fas fa-save"></i> Сохранить в облако
+                            </button>
+                            <button class="btn btn-outline" onclick="GitHubSync.loadData()">
+                                <i class="fas fa-download"></i> Загрузить из облака
+                            </button>
+                            <button class="btn btn-outline" onclick="window.open('https://github.com/${this.config.owner}/${this.config.repo}', '_blank')">
+                                <i class="fab fa-github"></i> Открыть репозиторий
+                            </button>
+                            ${this.state.isConnected ? `
+                                <button class="btn btn-outline" onclick="GitHubSync.disconnect()" style="color: var(--error);">
+                                    <i class="fas fa-unlink"></i> Отключить синхронизацию
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('content').innerHTML = content;
     },
     
     updateUI() {
@@ -3920,22 +4163,57 @@ const GitHubSync = {
         if (btn) {
             btn.innerHTML = `
                 <i class="fas fa-cloud"></i>
-                <span>${this.state.isConnected ? 'Синхр' : 'GitHub'}</span>
+                <span class="hide-on-mobile">${this.state.isConnected ? 'Синхр' : 'GitHub'}</span>
             `;
-            btn.title = this.state.isConnected ? 'Синхронизировать' : 'Настроить GitHub';
-            btn.onclick = () => this.state.isConnected ? this.saveData() : this.showSetup();
+            btn.title = this.state.isConnected ? 'Синхронизировать с облаком' : 'Настроить GitHub';
+            btn.onclick = () => {
+                if (this.state.isConnected) {
+                    this.saveData();
+                } else {
+                    this.showSetup();
+                }
+            };
+        }
+    },
+    
+    disconnect() {
+        if (confirm('Отключить синхронизацию с GitHub?\nТокен будет удален из браузера.')) {
+            this.state.token = '';
+            this.state.isConnected = false;
+            this.state.lastSync = null;
+            
+            localStorage.removeItem('github_token');
+            
+            this.updateUI();
+            this.showNotification('Синхронизация отключена', 'info');
+            
+            // Перезагружаем раздел
+            this.loadCloudSection();
         }
     }
 };
 
-// Инициализация
-document.addEventListener('DOMContentLoaded', () => {
+// Инициализация после загрузки DOM
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => {
+            GitHubSync.init();
+        }, 1000);
+    });
+} else {
     setTimeout(() => {
         GitHubSync.init();
-    }, 2000);
-});
+    }, 1000);
+}
 
-// Добавляем в глобальную область видимости
+// Включаем автосохранение через 5 секунд
+setTimeout(() => {
+    if (GitHubSync.state.isConnected) {
+        GitHubSync.enableSimpleAutoSave();
+    }
+}, 5000);
+
+// Экспортируем
 window.GitHubSync = GitHubSync;
 
 console.log('✅ GitHub Sync loaded');
