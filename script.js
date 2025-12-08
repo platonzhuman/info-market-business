@@ -2930,3 +2930,807 @@ const additionalStyles = `
 const styleElement = document.createElement('style');
 styleElement.textContent = additionalStyles;
 document.head.appendChild(styleElement);
+
+// ==================== СИНХРОНИЗАЦИЯ ЧЕРЕЗ GITHUB GIST ====================
+const SyncService = {
+    GIST_CONFIG: {
+        FILENAME: 'business-panel-data.json',
+        DESCRIPTION: 'Business Panel Data Backup',
+        SCOPE: 'gist'
+    },
+
+    // Проверяем наличие токена
+    hasToken() {
+        return !!BusinessDataService.data.settings?.githubToken;
+    },
+
+    // Создаем или обновляем Gist
+    async saveToGist() {
+        const token = BusinessDataService.data.settings.githubToken;
+        if (!token) {
+            NotificationService.show('GitHub токен не настроен', 'error');
+            return false;
+        }
+
+        const gistId = BusinessDataService.data.settings.gistId;
+        const data = {
+            businessData: BusinessDataService.data,
+            exportDate: new Date().toISOString(),
+            version: '3.0',
+            userId: AuthService.currentUser?.id
+        };
+
+        const url = gistId ? 
+            `https://api.github.com/gists/${gistId}` : 
+            'https://api.github.com/gists';
+
+        const body = {
+            description: this.GIST_CONFIG.DESCRIPTION,
+            public: false,
+            files: {
+                [this.GIST_CONFIG.FILENAME]: {
+                    content: JSON.stringify(data, null, 2)
+                }
+            }
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: gistId ? 'PATCH' : 'POST',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            
+            // Сохраняем ID Gist
+            if (!gistId) {
+                BusinessDataService.data.settings.gistId = result.id;
+                BusinessDataService.save();
+            }
+
+            // Обновляем время последней синхронизации
+            BusinessDataService.data.settings.lastSync = new Date().toISOString();
+            BusinessDataService.save();
+
+            return { success: true, gistId: result.id };
+        } catch (error) {
+            console.error('Error saving to Gist:', error);
+            return { success: false, error: error.message };
+        }
+    },
+
+    // Загружаем данные из Gist
+    async loadFromGist() {
+        const token = BusinessDataService.data.settings.githubToken;
+        const gistId = BusinessDataService.data.settings.gistId;
+
+        if (!token || !gistId) {
+            NotificationService.show('Настройте синхронизацию сначала', 'error');
+            return false;
+        }
+
+        try {
+            const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    NotificationService.show('Gist не найден. Возможно, он был удален.', 'error');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const gist = await response.json();
+            const file = gist.files[this.GIST_CONFIG.FILENAME];
+            
+            if (!file) {
+                throw new Error('Файл с данными не найден в Gist');
+            }
+
+            const data = JSON.parse(file.content);
+            
+            // Проверяем версию
+            if (!data.businessData) {
+                throw new Error('Неверный формат данных');
+            }
+
+            // Спрашиваем подтверждение перед перезаписью
+            if (confirm('Загрузить данные из облака? Текущие данные будут заменены.')) {
+                BusinessDataService.data = BusinessDataService.mergeWithDefaults(data.businessData);
+                BusinessDataService.data.settings.lastSync = new Date().toISOString();
+                BusinessDataService.save();
+                
+                // Обновляем интерфейс
+                SectionLoader.load(SectionLoader.currentSection);
+                NotificationService.show('Данные загружены из облака', 'success');
+                return true;
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('Error loading from Gist:', error);
+            NotificationService.show(`Ошибка загрузки: ${error.message}`, 'error');
+            return false;
+        }
+    },
+
+    // Ищем Gist по описанию
+    async findGist() {
+        const token = BusinessDataService.data.settings.githubToken;
+        if (!token) return null;
+
+        try {
+            const response = await fetch('https://api.github.com/gists', {
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const gists = await response.json();
+            const businessGist = gists.find(g => 
+                g.description === this.GIST_CONFIG.DESCRIPTION
+            );
+
+            return businessGist || null;
+        } catch (error) {
+            console.error('Error finding Gist:', error);
+            return null;
+        }
+    },
+
+    // Удаляем Gist
+    async deleteGist() {
+        const token = BusinessDataService.data.settings.githubToken;
+        const gistId = BusinessDataService.data.settings.gistId;
+
+        if (!token || !gistId) {
+            return false;
+        }
+
+        if (!confirm('Вы уверены, что хотите удалить облачную копию данных?')) {
+            return false;
+        }
+
+        try {
+            const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'Accept': 'application/vnd.github.v3+json'
+                }
+            });
+
+            if (response.ok) {
+                // Очищаем сохраненный ID
+                BusinessDataService.data.settings.gistId = '';
+                BusinessDataService.save();
+                return true;
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('Error deleting Gist:', error);
+            return false;
+        }
+    },
+
+    // Автоматическая синхронизация при запуске
+    async autoSync() {
+        if (!this.hasToken()) return;
+
+        // Если есть Gist ID, пробуем загрузить
+        if (BusinessDataService.data.settings.gistId) {
+            try {
+                await this.loadFromGist();
+            } catch (error) {
+                console.log('Auto-sync failed, using local data');
+            }
+        } else {
+            // Ищем существующий Gist
+            const existingGist = await this.findGist();
+            if (existingGist) {
+                BusinessDataService.data.settings.gistId = existingGist.id;
+                BusinessDataService.save();
+                await this.loadFromGist();
+            }
+        }
+    }
+};
+
+// ==================== ОБНОВЛЕНИЕ СЕРВИСА ДАННЫХ ====================
+// Обновляем метод init в BusinessDataService для автозагрузки
+const originalInit = BusinessDataService.init;
+BusinessDataService.init = async function() {
+    const result = originalInit.call(this);
+    
+    // Добавляем поле синхронизации если его нет
+    if (!this.data.settings.sync) {
+        this.data.settings.sync = {
+            githubToken: '',
+            gistId: '',
+            lastSync: null,
+            autoSync: false
+        };
+    }
+    
+    // Автосинхронизация при загрузке (если включено)
+    if (this.data.settings.sync.autoSync && this.data.settings.sync.githubToken) {
+        setTimeout(() => SyncService.autoSync(), 1000);
+    }
+    
+    return result;
+};
+
+// Обновляем метод save для автосинхронизации
+const originalSave = BusinessDataService.save;
+BusinessDataService.save = function() {
+    const result = originalSave.call(this);
+    
+    // Автоматическая синхронизация при сохранении
+    if (this.data.settings?.sync?.autoSync && this.data.settings.sync.githubToken) {
+        setTimeout(() => {
+            SyncService.saveToGist().then(({ success }) => {
+                if (success) {
+                    console.log('Auto-sync completed');
+                }
+            });
+        }, 500);
+    }
+    
+    return result;
+};
+
+// ==================== ОБНОВЛЕНИЕ ИНТЕРФЕЙСА ====================
+// Обновляем раздел функционала для добавления настроек синхронизации
+const originalLoadFunctionality = SectionLoader.loadFunctionality;
+SectionLoader.loadFunctionality = function() {
+    if (AuthService.currentUser?.role !== 'owner') {
+        document.getElementById('content').innerHTML = `
+            <div class="content-header">
+                <h1>Функционал системы</h1>
+            </div>
+            <div class="card">
+                <div style="text-align: center; padding: 60px;">
+                    <div style="font-size: 48px; color: var(--text-light); margin-bottom: 20px;">🔒</div>
+                    <h3 style="color: var(--text-light); margin-bottom: 10px;">Доступ запрещен</h3>
+                    <p style="color: var(--text-light);">
+                        Этот раздел доступен только владельцу системы
+                    </p>
+                </div>
+            </div>
+        `;
+        return;
+    }
+    
+    const settings = BusinessDataService.data.settings.sync || {};
+    const lastSync = settings.lastSync ? Utils.formatDate(settings.lastSync, true) : 'никогда';
+    
+    const content = `
+        <div class="content-header">
+            <h1>Функционал системы</h1>
+        </div>
+        
+        <div class="grid">
+            ${UIService.createCard(
+                '<div class="card-header"><h2><i class="fab fa-github"></i> Синхронизация с облаком</h2></div>',
+                `
+                    <div style="margin-bottom: 20px;">
+                        <p>Синхронизируйте данные между устройствами через GitHub Gist.</p>
+                        <p><strong>Последняя синхронизация:</strong> ${lastSync}</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="githubToken">GitHub Personal Access Token</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="password" id="githubToken" class="form-control" 
+                                   value="${settings.githubToken || ''}"
+                                   placeholder="ghp_xxxxxxxxxxxxxxxxxxxx">
+                            <button class="btn btn-outline" onclick="App.showTokenHelp()" style="white-space: nowrap;">
+                                <i class="fas fa-question-circle"></i>
+                            </button>
+                        </div>
+                        <small style="color: var(--text-light); display: block; margin-top: 4px;">
+                            Требуется токен с разрешением "gist". 
+                            <a href="https://github.com/settings/tokens/new?scopes=gist&description=Business+Panel" 
+                               target="_blank" style="color: var(--accent);">Создать токен</a>
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="gistId">Gist ID</label>
+                        <input type="text" id="gistId" class="form-control" 
+                               value="${settings.gistId || ''}"
+                               placeholder="Автоматически заполнится после первой синхронизации" readonly>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="autoSync" ${settings.autoSync ? 'checked' : ''}>
+                            Автоматическая синхронизация при изменении данных
+                        </label>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 24px;">
+                        <button class="btn btn-primary" onclick="App.saveSyncSettings()">
+                            <i class="fas fa-save"></i> Сохранить настройки
+                        </button>
+                        
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                            <button class="btn btn-outline" onclick="App.syncToCloud()">
+                                <i class="fas fa-cloud-upload-alt"></i> Загрузить в облако
+                            </button>
+                            <button class="btn btn-outline" onclick="App.syncFromCloud()">
+                                <i class="fas fa-cloud-download-alt"></i> Загрузить из облака
+                            </button>
+                        </div>
+                        
+                        <button class="btn btn-outline" onclick="App.deleteCloudData()" style="color: var(--error);">
+                            <i class="fas fa-trash"></i> Удалить облачную копию
+                        </button>
+                    </div>
+                `
+            )}
+            
+            ${UIService.createCard(
+                '<div class="card-header"><h2><i class="fas fa-save"></i> Резервное копирование</h2></div>',
+                `
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button class="btn btn-primary" onclick="App.exportAllData()">
+                            <i class="fas fa-download"></i> Экспорт всех данных
+                        </button>
+                        <button class="btn btn-outline" onclick="App.showImportModal()">
+                            <i class="fas fa-upload"></i> Импорт данных
+                        </button>
+                        <button class="btn btn-outline" onclick="App.createBackup()">
+                            <i class="fas fa-save"></i> Создать резервную копию
+                        </button>
+                    </div>
+                `
+            )}
+            
+            ${UIService.createCard(
+                '<div class="card-header"><h2><i class="fas fa-cogs"></i> Настройки системы</h2></div>',
+                `
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button class="btn btn-outline" onclick="App.showCompanySettingsModal()">
+                            <i class="fas fa-building"></i> Настройки компании
+                        </button>
+                        <button class="btn btn-outline" onclick="App.clearAllData()">
+                            <i class="fas fa-trash"></i> Очистить все данные
+                        </button>
+                        <button class="btn btn-outline" onclick="App.resetDemoData()">
+                            <i class="fas fa-redo"></i> Сбросить на демо-данные
+                        </button>
+                    </div>
+                `
+            )}
+        </div>
+    `;
+    
+    document.getElementById('content').innerHTML = content;
+};
+
+// ==================== ДОБАВЛЕНИЕ МЕТОДОВ В APP ====================
+window.App = {
+    ...window.App, // Сохраняем существующие методы
+    
+    // Показываем справку по токену
+    showTokenHelp() {
+        const modalHTML = `
+            <div class="modal">
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2><i class="fab fa-github"></i> Как получить GitHub токен</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="margin-bottom: 20px;">
+                            <p>Для синхронизации данных необходим персональный токен GitHub:</p>
+                        </div>
+                        
+                        <ol style="margin-left: 20px; margin-bottom: 20px;">
+                            <li>Перейдите в <a href="https://github.com/settings/tokens" target="_blank" style="color: var(--accent);">GitHub Tokens</a></li>
+                            <li>Нажмите "Generate new token" → "Generate new token (classic)"</li>
+                            <li>Укажите название (например, "Business Panel Sync")</li>
+                            <li>Выберите срок действия (рекомендуется "No expiration")</li>
+                            <li>Отметьте только разрешение <strong>"gist"</strong></li>
+                            <li>Нажмите "Generate token"</li>
+                            <li>Скопируйте токен (начинается с ghp_) и вставьте в поле выше</li>
+                        </ol>
+                        
+                        <div style="background: var(--warning-light); padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                            <strong>⚠️ Важно:</strong>
+                            <ul style="margin: 8px 0 0 20px;">
+                                <li>Никому не сообщайте этот токен</li>
+                                <li>Токен дает доступ к вашим Gist</li>
+                                <li>Если токен утерян, отзовите его на GitHub</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-primary" onclick="ModalService.close()">Понятно</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        ModalService.show(modalHTML);
+    },
+    
+    // Сохраняем настройки синхронизации
+    saveSyncSettings() {
+        const token = document.getElementById('githubToken').value.trim();
+        const gistId = document.getElementById('gistId').value.trim();
+        const autoSync = document.getElementById('autoSync').checked;
+        
+        // Базовая валидация токена
+        if (token && !token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
+            NotificationService.show('Неверный формат GitHub токена', 'error');
+            return;
+        }
+        
+        BusinessDataService.data.settings.sync = {
+            githubToken: token,
+            gistId: gistId,
+            lastSync: BusinessDataService.data.settings.sync?.lastSync,
+            autoSync: autoSync
+        };
+        
+        BusinessDataService.save();
+        NotificationService.show('Настройки синхронизации сохранены', 'success');
+        
+        // Если включена автосинхронизация и есть токен, делаем первую синхронизацию
+        if (autoSync && token) {
+            setTimeout(() => this.syncToCloud(), 1000);
+        }
+    },
+    
+    // Синхронизация в облако
+    async syncToCloud() {
+        const token = BusinessDataService.data.settings.sync?.githubToken;
+        if (!token) {
+            NotificationService.show('Сначала настройте GitHub токен', 'error');
+            return;
+        }
+        
+        NotificationService.show('Синхронизация...', 'info');
+        
+        const result = await SyncService.saveToGist();
+        if (result.success) {
+            // Обновляем поле Gist ID если он создан
+            if (result.gistId && !BusinessDataService.data.settings.sync.gistId) {
+                BusinessDataService.data.settings.sync.gistId = result.gistId;
+                BusinessDataService.save();
+            }
+            
+            NotificationService.show('Данные сохранены в облако', 'success');
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        } else {
+            NotificationService.show(`Ошибка: ${result.error}`, 'error');
+        }
+    },
+    
+    // Загрузка из облака
+    async syncFromCloud() {
+        const result = await SyncService.loadFromGist();
+        if (result) {
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        }
+    },
+    
+    // Удаление облачной копии
+    async deleteCloudData() {
+        const result = await SyncService.deleteGist();
+        if (result) {
+            NotificationService.show('Облачная копия удалена', 'success');
+            SectionLoader.load('functionality'); // Обновляем интерфейс
+        } else {
+            NotificationService.show('Ошибка удаления', 'error');
+        }
+    }
+};
+
+// ==================== СТИЛИ ДЛЯ СИНХРОНИЗАЦИИ ====================
+const syncStyles = `
+/* Стили для раздела синхронизации */
+.sync-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.sync-success {
+    background: rgba(0, 200, 83, 0.1);
+    color: var(--success);
+}
+
+.sync-error {
+    background: rgba(244, 67, 54, 0.1);
+    color: var(--error);
+}
+
+.sync-pending {
+    background: rgba(255, 145, 0, 0.1);
+    color: var(--warning);
+}
+
+.token-help {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+}
+
+.token-help:hover {
+    color: var(--accent);
+}
+
+@media (max-width: 768px) {
+    .sync-buttons {
+        grid-template-columns: 1fr !important;
+    }
+}
+`;
+
+// Добавляем стили в документ
+const syncStyleElement = document.createElement('style');
+syncStyleElement.textContent = syncStyles;
+document.head.appendChild(syncStyleElement);
+
+// ==================== ИНИЦИАЛИЗАЦИЯ СИНХРОНИЗАЦИИ ====================
+// Обновляем инициализацию App для поддержки синхронизации
+const originalAppInit = App.init;
+App.init = function() {
+    if (!AuthService.check()) return;
+    
+    BusinessDataService.init();
+    UIService.init();
+    
+    // Запускаем автосинхронизацию с небольшой задержкой
+    setTimeout(() => {
+        if (BusinessDataService.data.settings?.sync?.autoSync && 
+            BusinessDataService.data.settings.sync.githubToken) {
+            SyncService.autoSync();
+        }
+    }, 2000);
+    
+    const activeItem = document.querySelector('.menu-item.active');
+    const section = activeItem ? activeItem.getAttribute('data-section') : 'main';
+    SectionLoader.load(section);
+};
+
+// ==================== БЫСТРЫЙ ЭКСПОРТ/ИМПОРТ ДЛЯ РУЧНОЙ СИНХРОНИЗАЦИИ ====================
+// Добавляем кнопки быстрого экспорта/импорта в основной интерфейс
+const originalLoadMain = SectionLoader.loadMain;
+SectionLoader.loadMain = function() {
+    originalLoadMain.call(this);
+    
+    // Добавляем кнопки быстрой синхронизации если пользователь владелец
+    if (AuthService.currentUser?.role === 'owner') {
+        const contentHeader = document.querySelector('.content-header');
+        if (contentHeader) {
+            const syncButtons = document.createElement('div');
+            syncButtons.className = 'sync-buttons';
+            syncButtons.style.cssText = `
+                display: flex;
+                gap: 8px;
+                margin-top: 12px;
+            `;
+            
+            syncButtons.innerHTML = `
+                <button class="btn btn-outline btn-sm" onclick="App.quickExport()" title="Экспорт данных для другого устройства">
+                    <i class="fas fa-file-export"></i> Быстрый экспорт
+                </button>
+                <button class="btn btn-outline btn-sm" onclick="App.quickImport()" title="Импорт данных с другого устройства">
+                    <i class="fas fa-file-import"></i> Быстрый импорт
+                </button>
+            `;
+            
+            contentHeader.appendChild(syncButtons);
+        }
+    }
+};
+
+// Методы быстрого экспорта/импорта
+App.quickExport = function() {
+    const data = {
+        businessData: BusinessDataService.data,
+        exportDate: new Date().toISOString(),
+        version: '3.0'
+    };
+    
+    // Создаем строку данных в base64 для удобства копирования
+    const dataStr = JSON.stringify(data, null, 2);
+    const compressed = btoa(unescape(encodeURIComponent(dataStr)));
+    
+    const modalHTML = `
+        <div class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h2><i class="fas fa-file-export"></i> Быстрый экспорт данных</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p>Используйте этот код для переноса данных на другое устройство:</p>
+                    
+                    <div style="margin: 16px 0;">
+                        <textarea id="exportData" style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px;" readonly>${compressed}</textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 8px; margin-top: 16px;">
+                        <button class="btn btn-primary" onclick="App.copyExportData()">
+                            <i class="fas fa-copy"></i> Скопировать код
+                        </button>
+                        <button class="btn btn-outline" onclick="App.downloadExportFile()">
+                            <i class="fas fa-download"></i> Скачать файл
+                        </button>
+                    </div>
+                    
+                    <div style="margin-top: 16px; padding: 12px; background: var(--bg); border-radius: 8px;">
+                        <p><strong>Как использовать:</strong></p>
+                        <ol style="margin-left: 20px;">
+                            <li>Скопируйте код выше</li>
+                            <li>На другом устройстве откройте эту панель</li>
+                            <li>Нажмите "Быстрый импорт"</li>
+                            <li>Вставьте код и нажмите "Импортировать"</li>
+                        </ol>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="ModalService.close()">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalService.show(modalHTML);
+};
+
+App.copyExportData = function() {
+    const textarea = document.getElementById('exportData');
+    textarea.select();
+    document.execCommand('copy');
+    NotificationService.show('Код скопирован в буфер обмена', 'success');
+};
+
+App.downloadExportFile = function() {
+    const data = {
+        businessData: BusinessDataService.data,
+        exportDate: new Date().toISOString(),
+        version: '3.0'
+    };
+    
+    const dataStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const link = document.createElement('a');
+    
+    link.href = URL.createObjectURL(blob);
+    link.download = `business-panel-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    
+    NotificationService.show('Файл скачан', 'success');
+};
+
+App.quickImport = function() {
+    const modalHTML = `
+        <div class="modal">
+            <div class="modal-content" style="max-width: 700px;">
+                <div class="modal-header">
+                    <h2><i class="fas fa-file-import"></i> Быстрый импорт данных</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 16px;">
+                        <p>Вставьте код экспорта или загрузите файл:</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="importCode">Код экспорта (base64)</label>
+                        <textarea id="importCode" style="width: 100%; height: 150px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 12px;" placeholder="Вставьте сюда код экспорта..."></textarea>
+                    </div>
+                    
+                    <div style="text-align: center; margin: 16px 0; color: var(--text-light);">ИЛИ</div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="importFile">Файл экспорта (.json)</label>
+                        <input type="file" id="importFile" class="form-control" accept=".json">
+                    </div>
+                    
+                    <div style="background: rgba(244, 67, 54, 0.1); padding: 12px; border-radius: 8px; margin-top: 16px;">
+                        <strong>⚠️ Внимание:</strong> Все текущие данные будут заменены!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="ModalService.close()">Отмена</button>
+                    <button class="btn btn-primary" onclick="App.processQuickImport()">Импортировать</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    ModalService.show(modalHTML);
+};
+
+App.processQuickImport = function() {
+    const importCode = document.getElementById('importCode').value.trim();
+    const importFile = document.getElementById('importFile').files[0];
+    
+    if (!importCode && !importFile) {
+        NotificationService.show('Введите код или выберите файл', 'error');
+        return;
+    }
+    
+    if (!confirm('Все текущие данные будут заменены. Продолжить?')) {
+        return;
+    }
+    
+    const processData = (dataStr) => {
+        try {
+            const data = JSON.parse(dataStr);
+            
+            if (!data.businessData) {
+                throw new Error('Неверный формат данных');
+            }
+            
+            BusinessDataService.data = BusinessDataService.mergeWithDefaults(data.businessData);
+            BusinessDataService.save();
+            
+            NotificationService.show('Данные успешно импортированы', 'success');
+            ModalService.close();
+            
+            // Перезагружаем текущий раздел
+            setTimeout(() => {
+                SectionLoader.load(SectionLoader.currentSection);
+                NotificationService.show('Перезагрузите страницу для применения изменений', 'info');
+            }, 1000);
+            
+        } catch (error) {
+            NotificationService.show(`Ошибка импорта: ${error.message}`, 'error');
+        }
+    };
+    
+    if (importFile) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            processData(e.target.result);
+        };
+        reader.readAsText(importFile);
+    } else {
+        try {
+            // Декодируем base64
+            const decoded = decodeURIComponent(escape(atob(importCode)));
+            processData(decoded);
+        } catch (error) {
+            NotificationService.show('Неверный формат кода', 'error');
+        }
+    }
+};
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+console.log('Business Panel v3.0 - Sync system loaded');
