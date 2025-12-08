@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Бизнес-панель</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Дополнительные стили для улучшенного интерфейса */
+        :root {
+            --primary: #1a237e;
+            --primary-light: #534bae;
+            --primary-dark: #000051;
+            --accent: #00b0ff;
+            --success: #00c853;
+            --warning: #ff9100;
+            --error: #f44336;
+            --text: #263238;
+            --text-light: #607d8b;
+            --bg: #f5f7fa;
+            --card: #ffffff;
+            --border: #e0e0e0;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --radius: 12px;
+        }
+        
+        .app-loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid white;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+        }
+        
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Градиентные акценты */
+        .gradient-text {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        /* Микро-анимации */
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        /* Стили для статусов */
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-success {
+            background: rgba(0, 200, 83, 0.1);
+            color: var(--success);
+        }
+        
+        .status-warning {
+            background: rgba(255, 145, 0, 0.1);
+            color: var(--warning);
+        }
+        
+        .status-error {
+            background: rgba(244, 67, 54, 0.1);
+            color: var(--error);
+        }
+        
+        .status-info {
+            background: rgba(0, 176, 255, 0.1);
+            color: var(--accent);
+        }
+        
+        /* Стили для сетки */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+        
+        /* Стили для информационных списков */
+        .info-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .info-item:last-child {
+            border-bottom: none;
+        }
+        
+        .info-label {
+            color: var(--text-light);
+            font-size: 14px;
+        }
+        
+        .info-value {
+            font-weight: 500;
+            font-size: 16px;
+        }
+        
+        .info-value.success {
+            color: var(--success);
+        }
+        
+        .info-value.error {
+            color: var(--error);
+        }
+        
+        /* Кнопки действий */
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Загрузка -->
+    <div class="app-loading" id="appLoading">
+        <div class="loader"></div>
+    </div>
+
+    <!-- Основной контейнер -->
+    <div class="app-container" style="display: none;" id="appContainer">
+        <!-- Навигация -->
+        <nav class="navbar">
+            <button class="hamburger" id="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            
+            <div class="navbar-brand">
+      
+                <span>Бизнес-панель</span>
+            </div>
+            
+            <div class="navbar-actions">
+               
+                <button class="btn btn-outline" id="logoutBtn">
+                    <i class="fas fa-sign-out-alt"></i> Выход
+                </button>
+            </div>
+        </nav>
+
+        <!-- Боковая панель -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">П</div>
+                    <div class="user-details">
+                        <h3 id="userName">Платон</h3>
+                        <span id="userRole">Владелец</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="menu">
+                <div class="menu-section">
+                    <h4>Основное</h4>
+                    <button class="menu-item active" data-section="main">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Основная информация</span>
+                    </button>
+                </div>
+
+                <div class="menu-section">
+                    <h4>Управление</h4>
+                    <button class="menu-item" data-section="staff">
+                        <i class="fas fa-users"></i>
+                        <span>Персонал</span>
+                    </button>
+                    <button class="menu-item" data-section="clients">
+                        <i class="fas fa-handshake"></i>
+                        <span>Клиенты</span>
+                    </button>
+                    <button class="menu-item" data-section="reports">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Отчеты</span>
+                    </button>
+                </div>
+
+                <div class="menu-section">
+                    <h4>Развитие</h4>
+                    <button class="menu-item" data-section="ideas">
+                        <i class="fas fa-lightbulb"></i>
+                        <span>Идеи</span>
+                    </button>
+                    <button class="menu-item" data-section="functionality">
+                        <i class="fas fa-cogs"></i>
+                        <span>Функционал</span>
+                    </button>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Основной контент -->
+        <main class="main-content" id="mainContent">
+            <div id="content">
+                <!-- Контент будет загружен через JavaScript -->
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+    <script>
+        // Инициализация при загрузке
+        window.addEventListener('load', function() {
+            // Скрываем загрузку
+            setTimeout(() => {
+                const appLoading = document.getElementById('appLoading');
+                const appContainer = document.getElementById('appContainer');
+                
+                if (appLoading) appLoading.style.display = 'none';
+                if (appContainer) appContainer.style.display = 'flex';
+            }, 500);
+        });
+    </script>
+</body>
+</html>

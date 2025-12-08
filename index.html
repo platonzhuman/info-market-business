@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Info-market | Бизнес-панель</title>
+    <style>
+        :root {
+            --primary: #1a237e;
+            --primary-light: #534bae;
+            --primary-dark: #000051;
+            --accent: #00b0ff;
+            --success: #00c853;
+            --warning: #ff9100;
+            --error: #f44336;
+            --text: #263238;
+            --text-light: #607d8b;
+            --bg: #f5f7fa;
+            --card: #ffffff;
+            --border: #e0e0e0;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .login-container {
+            width: 100%;
+            max-width: 420px;
+            background: var(--card);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+        
+        .login-header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        
+        .login-header h1 {
+            font-size: 28px;
+            font-weight: 300;
+            margin-bottom: 8px;
+        }
+        
+        .login-header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .login-body {
+            padding: 40px;
+        }
+        
+        .form-group {
+            margin-bottom: 24px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: white;
+            box-shadow: 0 0 0 3px rgba(0, 176, 255, 0.1);
+        }
+        
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(26, 35, 126, 0.2);
+        }
+        
+        .login-btn:active {
+            transform: translateY(0);
+        }
+        
+        .error-message {
+            background: rgba(244, 67, 54, 0.1);
+            color: var(--error);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        
+
+
+        @media (max-width: 480px) {
+            .login-container {
+                max-width: 100%;
+            }
+            
+            .login-body {
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Info-market</h1>
+            <p>Управление бизнес-процессами</p>
+        </div>
+        
+        <div class="login-body">
+            <div class="form-group">
+                <label class="form-label">Логин</label>
+                <input type="text" id="username" class="form-input" placeholder="Введите логин" value="">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Пароль</label>
+                <input type="password" id="password" class="form-input" placeholder="Введите пароль" value="">
+            </div>
+            
+            <button class="login-btn" onclick="login()">Войти в систему</button>
+            
+            <div class="error-message" id="errorMessage">
+                Неверный логин или пароль
+            </div>
+            
+
+
+        </div>
+    </div>
+
+    <script>
+        function login() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            
+            // Владелец системы
+            if (username === 'platon' && password === '505') {
+                localStorage.setItem('user', JSON.stringify({
+                    id: 1,
+                    username: 'platon',
+                    name: 'Платон (Владелец)',
+                    role: 'owner',
+                    permissions: ['all'],
+                    loginTime: new Date().toISOString()
+                }));
+                
+                window.location.href = 'busines.html';
+                return;
+            }
+            
+            // Проверка сотрудников из business_data
+            const businessDataStr = localStorage.getItem('business_data');
+            if (businessDataStr) {
+                try {
+                    const businessData = JSON.parse(businessDataStr);
+                    if (businessData && businessData.staff) {
+                        const employee = businessData.staff.find(emp => 
+                            emp.username === username && 
+                            emp.password === password && 
+                            (emp.active === undefined || emp.active === true)
+                        );
+                        
+                        if (employee) {
+                            localStorage.setItem('user', JSON.stringify({
+                                id: employee.id,
+                                username: employee.username,
+                                name: employee.name,
+                                role: employee.role,
+                                permissions: employee.permissions || [],
+                                loginTime: new Date().toISOString()
+                            }));
+                            
+                            window.location.href = 'busines.html';
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Ошибка при чтении данных:', e);
+                }
+            }
+            
+            // Неверные данные
+            errorMessage.style.display = 'block';
+            setTimeout(() => {
+                errorMessage.style.display = 'none';
+            }, 3000);
+        }
+        
+        // Ввод по Enter
+        document.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+        
+        // Проверка демо-данных при первой загрузке
+        window.addEventListener('load', function() {
+            // Если нет данных, создаем демо-данные
+            const businessDataStr = localStorage.getItem('business_data');
+            if (!businessDataStr) {
+                const demoData = {
+                    staff: [
+                        {
+                            id: 2,
+                            username: 'manager',
+                            password: 'manager123',
+                            name: 'Иван Петров',
+                            role: 'manager',
+                            permissions: [
+                                'staff_view',
+                                'clients_view',
+                                'clients_add',
+                                'clients_edit',
+                                'reports_view',
+                                'ideas_view',
+                                'ideas_add'
+                            ],
+                            active: true,
+                            createdAt: '2024-01-15',
+                            salary: 80000,
+                            department: 'Продажи'
+                        },
+                        {
+                            id: 3,
+                            username: 'developer',
+                            password: 'dev12345',
+                            name: 'Алексей Сидоров',
+                            role: 'employee',
+                            permissions: [
+                                'ideas_view',
+                                'ideas_add',
+                                'ideas_edit'
+                            ],
+                            active: true,
+                            createdAt: '2024-02-10',
+                            salary: 120000,
+                            department: 'Разработка'
+                        }
+                    ],
+                    clients: [],
+                    ideas: [],
+                    reports: [],
+                    finances: {
+                        income: 0,
+                        expenses: 0,
+                        transactions: []
+                    },
+                    settings: {
+                        companyName: 'Моя компания',
+                        currency: '₽',
+                        taxRate: 13
+                    }
+                };
+                
+                localStorage.setItem('business_data', JSON.stringify(demoData));
+            }
+        });
+    </script>
+</body>
+</html>
