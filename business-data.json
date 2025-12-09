@@ -1,39 +1,38 @@
 {
   "staff": [
     {
-      "name": "Пермяков Никита Александрович",
-      "username": "permak07",
-      "role": "admin",
-      "department": "тг-боты",
-      "salary": 0,
-      "active": true,
+      "id": 2,
+      "username": "manager",
+      "name": "Иван Петров",
+      "role": "manager",
       "permissions": [
         "staff_view",
-        "staff_add",
-        "staff_edit",
-        "staff_delete",
         "clients_view",
         "clients_add",
         "clients_edit",
-        "clients_delete",
         "reports_view",
-        "reports_export",
+        "ideas_view",
+        "ideas_add"
+      ],
+      "active": true,
+      "createdAt": "2024-01-15",
+      "salary": 80000,
+      "department": "Продажи"
+    },
+    {
+      "id": 3,
+      "username": "developer",
+      "name": "Алексей Сидоров",
+      "role": "employee",
+      "permissions": [
         "ideas_view",
         "ideas_add",
-        "ideas_edit",
-        "ideas_delete",
-        "settings_edit",
-        "data_export",
-        "data_import",
-        "employee_reports_view",
-        "employee_reports_add",
-        "employee_reports_edit",
-        "employee_reports_delete",
-        "employee_reports_manage_all"
+        "ideas_edit"
       ],
-      "createdAt": "2025-12-09",
-      "createdBy": 1,
-      "id": 1765252562896
+      "active": true,
+      "createdAt": "2024-02-10",
+      "salary": 120000,
+      "department": "Разработка"
     }
   ],
   "clients": [],
@@ -51,8 +50,8 @@
     "taxRate": 13
   },
   "_meta": {
-    "savedAt": "2025-12-09T03:58:03.327Z",
+    "savedAt": "2025-12-09T03:59:13.582Z",
     "version": "2.0",
-    "lastSync": "2025-12-09T03:56:07.588Z"
+    "lastSync": null
   }
 }
