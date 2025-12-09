@@ -36,22 +36,47 @@
       "id": 1765253105702
     }
   ],
-  "clients": [],
-  "ideas": [],
+  "clients": [
+    {
+      "name": "петя",
+      "contact": "5464564",
+      "email": "pllpl@ru",
+      "address": "42342",
+      "status": "active",
+      "id": 1765253308777,
+      "createdAt": "2025-12-09"
+    }
+  ],
+  "ideas": [
+    {
+      "title": "asdfasf",
+      "description": "asfasf",
+      "category": "Разработка",
+      "priority": "medium",
+      "status": "completed",
+      "budget": 231424,
+      "deadline": "",
+      "createdBy": 1,
+      "id": 1765253378785,
+      "createdAt": "2025-12-09"
+    }
+  ],
   "reports": [],
-  "employeeReports": {},
+  "employeeReports": {
+    "1765253105702": []
+  },
   "finances": {
     "income": 0,
     "expenses": 0,
     "transactions": []
   },
   "settings": {
-    "companyName": "Моя компания",
+    "companyName": "info-market",
     "currency": "₽",
-    "taxRate": 13
+    "taxRate": 6
   },
   "_meta": {
-    "savedAt": "2025-12-09T04:07:37.767Z",
+    "savedAt": "2025-12-09T04:10:23.745Z",
     "version": "2.0",
     "lastSync": null
   }
