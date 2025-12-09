@@ -33,6 +33,18 @@
       "createdAt": "2024-02-10",
       "salary": 120000,
       "department": "Разработка"
+    },
+    {
+      "name": "Пермяк",
+      "username": "П",
+      "role": "manager",
+      "department": "О",
+      "salary": 0,
+      "active": true,
+      "permissions": [],
+      "createdAt": "2025-12-09",
+      "createdBy": 1,
+      "id": 1765247953211
     }
   ],
   "clients": [],
@@ -50,8 +62,8 @@
     "taxRate": 13
   },
   "_meta": {
-    "savedAt": "2025-12-09T02:38:27.577Z",
+    "savedAt": "2025-12-09T02:39:21.546Z",
     "version": "2.0",
-    "lastSync": null
+    "lastSync": "2025-12-09T02:38:46.657Z"
   }
 }
