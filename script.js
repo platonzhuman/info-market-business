@@ -1837,6 +1837,8 @@ const GitHubSync = {
             // Подготавливаем данные (удаляем пароли)
             const dataToSave = this.prepareDataForSave();
             const content = JSON.stringify(dataToSave, null, 2);
+            
+            // ФИКС ДЛЯ КИРИЛЛИЦЫ: правильное кодирование
             const encoded = btoa(unescape(encodeURIComponent(content)));
             
             // Пытаемся получить информацию о существующем файле
@@ -1988,16 +1990,40 @@ const GitHubSync = {
             
             const fileData = await response.json();
             const content = atob(fileData.content.replace(/\n/g, ''));
-            const data = JSON.parse(content);
             
-            if (confirm('Найдены данные в облаке. Загрузить их?\n(Текущие данные будут заменены)')) {
-                this.mergeData(data);
-                this.state.lastSync = new Date().toISOString();
-                NotificationService.show('✅ Данные загружены из облака', 'success');
-                return true;
+            // Пробуем декодировать UTF-8
+            try {
+                const decoded = decodeURIComponent(escape(content));
+                const data = JSON.parse(decoded);
+                
+                if (confirm('Найдены данные в облаке. Загрузить их?\n(Текущие данные будут заменены)')) {
+                    this.mergeData(data);
+                    this.state.lastSync = new Date().toISOString();
+                    NotificationService.show('✅ Данные загружены из облака', 'success');
+                    return true;
+                }
+                
+                return false;
+            } catch (decodeError) {
+                // Если не получилось декодировать UTF-8, пробуем как есть
+                console.warn('UTF-8 decode failed, trying raw decode:', decodeError);
+                
+                try {
+                    const data = JSON.parse(content);
+                    
+                    if (confirm('Найдены данные в облаке. Загрузить их?\n(Текущие данные будут заменены)')) {
+                        this.mergeData(data);
+                        this.state.lastSync = new Date().toISOString();
+                        NotificationService.show('✅ Данные загружены из облака', 'success');
+                        return true;
+                    }
+                    
+                    return false;
+                } catch (parseError) {
+                    NotificationService.show('❌ Ошибка парсинга данных из облака', 'error');
+                    return false;
+                }
             }
-            
-            return false;
             
         } catch (error) {
             console.error('Load error:', error);
@@ -2224,7 +2250,6 @@ const GitHubSync = {
         }
     }
 };
-
 // ==================== ГЛОБАЛЬНЫЙ ОБЪЕКТ APP ====================
 window.App = {
     init() {
