@@ -1,6 +1,6 @@
 /**
- * БИЗНЕС-ПАНЕЛЬ - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
- * С ФИКСИРОВАННОЙ СИНХРОНИЗАЦИЕЙ GITHUB
+ * БИЗНЕС-ПАНЕЛЬ - ФИКСИРОВАННАЯ ВЕРСИЯ
+ * С ИСПРАВЛЕННОЙ СИНХРОНИЗАЦИЕЙ
  */
 // ==================== КОНФИГУРАЦИЯ И КОНСТАНТЫ ====================
 const CONFIG = {
@@ -609,9 +609,9 @@ const BusinessDataService = {
         const saved = StorageService.set(CONFIG.STORAGE_KEYS.BUSINESS_DATA, this.data);
         
         // Автосинхронизация с GitHub если подключено
-        if (GitHubSync && GitHubSync.state.isConnected && !GitHubSync.state.isSaving) {
+        if (window.GitHubSync && GitHubSync.state.isConnected && !GitHubSync.state.isSaving) {
             setTimeout(() => {
-                GitHubSync.autoSave();
+                GitHubSync.saveData();
             }, 2000);
         }
         
@@ -1672,7 +1672,7 @@ const SectionLoader = {
     }
 };
 
-// ==================== GITHUB СИНХРОНИЗАЦИЯ - ЕДИНАЯ ВЕРСИЯ ====================
+// ==================== GITHUB СИНХРОНИЗАЦИЯ - ИСПРАВЛЕННАЯ ====================
 const GitHubSync = {
     config: {
         owner: 'platonzhuman',
@@ -1808,42 +1808,15 @@ const GitHubSync = {
             NotificationService.show('✅ GitHub подключен', 'success');
             this.updateUI();
             
-            // Загружаем данные из облака
+            // Сразу сохраняем данные чтобы создать файл
             setTimeout(() => {
-                this.loadData();
+                this.saveData();
             }, 1000);
             
             ModalService.close();
         } else {
             this.state.token = oldToken;
             NotificationService.show('❌ Неверный токен', 'error');
-        }
-    },
-    
-    async getFileInfo() {
-        try {
-            const response = await fetch(
-                `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
-                {
-                    headers: this.getHeaders(),
-                    signal: AbortSignal.timeout(5000)
-                }
-            );
-            
-            if (response.ok) {
-                const data = await response.json();
-                return {
-                    sha: data.sha,
-                    exists: true
-                };
-            } else if (response.status === 404) {
-                return { sha: null, exists: false };
-            } else {
-                throw new Error(`GitHub API error: ${response.status}`);
-            }
-        } catch (error) {
-            console.error('Get file info error:', error);
-            return null;
         }
     },
     
@@ -1866,11 +1839,25 @@ const GitHubSync = {
             const content = JSON.stringify(dataToSave, null, 2);
             const encoded = btoa(unescape(encodeURIComponent(content)));
             
-            // Получаем информацию о файле
-            const fileInfo = await this.getFileInfo();
-            
-            if (!fileInfo) {
-                throw new Error('Не удалось получить информацию о файле');
+            // Пытаемся получить информацию о существующем файле
+            let sha = null;
+            try {
+                const checkResponse = await fetch(
+                    `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
+                    {
+                        headers: this.getHeaders(),
+                        signal: AbortSignal.timeout(3000)
+                    }
+                );
+                
+                if (checkResponse.ok) {
+                    const fileData = await checkResponse.json();
+                    sha = fileData.sha;
+                }
+                // Если 404 - файла нет, это нормально, создадим новый
+            } catch (error) {
+                // Ошибка сети или файла нет
+                console.log('Файл не найден или ошибка сети:', error.message);
             }
             
             const body = {
@@ -1880,8 +1867,8 @@ const GitHubSync = {
             };
             
             // Добавляем SHA если файл существует
-            if (fileInfo.sha) {
-                body.sha = fileInfo.sha;
+            if (sha) {
+                body.sha = sha;
             }
             
             const response = await fetch(
@@ -1907,26 +1894,35 @@ const GitHubSync = {
                 
                 if (response.status === 409) {
                     // Конфликт - пробуем еще раз с новым SHA
-                    console.log('Конфликт, пробуем обновить SHA...');
+                    console.log('Конфликт, пробуем получить актуальный SHA...');
                     
-                    const newFileInfo = await this.getFileInfo();
-                    if (newFileInfo && newFileInfo.sha) {
-                        body.sha = newFileInfo.sha;
-                        
+                    try {
                         const retryResponse = await fetch(
                             `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
-                            {
-                                method: 'PUT',
-                                headers: this.getHeaders(),
-                                body: JSON.stringify(body)
-                            }
+                            { headers: this.getHeaders() }
                         );
                         
                         if (retryResponse.ok) {
-                            this.state.lastSync = new Date().toISOString();
-                            NotificationService.show('✅ Данные сохранены в облако', 'success');
-                            return true;
+                            const newFileData = await retryResponse.json();
+                            body.sha = newFileData.sha;
+                            
+                            const retrySave = await fetch(
+                                `https://api.github.com/repos/${this.config.owner}/${this.config.repo}/contents/${this.config.file}`,
+                                {
+                                    method: 'PUT',
+                                    headers: this.getHeaders(),
+                                    body: JSON.stringify(body)
+                                }
+                            );
+                            
+                            if (retrySave.ok) {
+                                this.state.lastSync = new Date().toISOString();
+                                NotificationService.show('✅ Данные сохранены в облако', 'success');
+                                return true;
+                            }
                         }
+                    } catch (retryError) {
+                        console.error('Retry failed:', retryError);
                     }
                 }
                 
@@ -1982,7 +1978,7 @@ const GitHubSync = {
             );
             
             if (response.status === 404) {
-                NotificationService.show('❌ Файл не найден в облаке', 'warning');
+                NotificationService.show('📁 Файл в облаке не найден. Сначала сохраните данные', 'info');
                 return false;
             }
             
@@ -2048,17 +2044,6 @@ const GitHubSync = {
             this.state.lastError = error.message;
             NotificationService.show('❌ Ошибка слияния данных', 'error');
         }
-    },
-    
-    autoSave() {
-        if (!this.state.isConnected || this.state.isSaving) {
-            return;
-        }
-        
-        // Сохраняем каждые 30 секунд если были изменения
-        setTimeout(() => {
-            this.saveData().catch(() => {});
-        }, 30000);
     },
     
     addInterface() {
@@ -2191,13 +2176,13 @@ const GitHubSync = {
                         <h2><i class="fas fa-question-circle"></i> Как это работает</h2>
                     </div>
                     <div class="card-body">
-                        <p>Все данные вашего бизнеса автоматически синхронизируются с GitHub.</p>
-                        <ul style="margin: 10px 0 10px 20px;">
-                            <li>🔒 Данные хранятся в вашем приватном репозитории</li>
-                            <li>⚡ Автоматическая синхронизация каждые 30 секунд</li>
-                            <li>📱 Доступ с любого устройства</li>
-                            <li>💾 Полная история изменений</li>
-                        </ul>
+                        <p><strong>Первый запуск:</strong></p>
+                        <ol style="margin: 10px 0 10px 20px;">
+                            <li>Настройте GitHub токен</li>
+                            <li>Нажмите "Сохранить в облако" - создастся файл</li>
+                            <li>Теперь можно загружать данные на других устройствах</li>
+                        </ol>
+                        <p><strong>Автосинхронизация:</strong> Все изменения сохраняются автоматически.</p>
                     </div>
                 </div>
             </div>
